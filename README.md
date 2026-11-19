@@ -35,26 +35,55 @@ made by the scripts when the game starts, so the scenes only hold the level art.
 5. **Money:** every flight pays $1 per meter + the coins you fly through, plus a one-time bonus the
    first time you pass 100, 250, 500 and 750 m. After a flight, the results screen has quick
    buttons: **Fly again (F)**, **Build (B)**, **Shop (S)** - no walking back across the yard.
-6. **Win:** reach the Moon at 1000 m.
+6. **Win:** reach the Moon, then Mars, then the Sun (see Stages).
 
 Other keys: **Esc** pause (volume, back to menu), **R** give up a flight, **F12** twice in the
 yard deletes all progress (for testing).
+
+## Stages
+
+Everything works the same in every stage (yard, shop, building, flying), but each trip is longer
+and more dangerous, so you need better parts to protect you, your cola and your rocket.
+
+| Stage | Trip | Danger | Protection |
+| --- | --- | --- | --- |
+| 1 | Earth -> the Moon (1000 m) | meteors | crates, metal crates |
+| 2 | Moon -> Mars (2500 m) | meteor storm + space junk flying sideways | Titanium crate, Space Helmet, Bubble shield |
+| 3 | Mars -> the Sun (4000 m) | fireballs + heat (colas boil, you can overheat) | Heat Shield, Cooler, Space Helmet |
+
+The yard changes with the stage: grey moon ground with craters and a flag (low gravity, big
+jumps, Earth in the sky), then red Mars ground. Reaching the goal shows a "stage cleared" screen
+and takes you to the next stage.
 
 ## Parts
 
 | Part | What it does |
 | --- | --- |
-| Seat | You sit here. Two meteor hits on the seat = crash |
-| Cola | Engine + fuel (hold Space) |
-| 2L Cola | Bigger engine, more push, sprays longer |
-| Crate / Metal Crate | Spare cola: colas touching it spray 1.2 s longer. Also armor: blocks 1 / 3 meteors |
-| Fin | Less spinning |
+| Seat | You sit here. Two hits on the seat = crash (Space Helmet adds hits) |
+| Cola / 2L Cola | Engines + fuel (hold Space) |
+| Mentos Boost | Huge push for 1 second |
+| Crate / Metal Crate | Spare cola: colas touching it spray 1.2 s longer. Armor: blocks 1 / 3 hits |
+| Cola Tank / 4L Tank | Spare cola for ALL colas (2 / 4 colas worth) once their own bottle is empty |
+| Fin / Wing | Less spinning; wings also give a little lift |
 | Nose Cone | Less air drag |
+| Coin Magnet | Pulls coins into the rocket |
+| Titanium (stage 2) | Blocks 6 hits, spare cola inside |
+| Bubble (stage 2) | Blocks one hit, recharges in 6 s |
+| Cooler (stage 3) | Colas and tanks touching it don't boil near the Sun |
+| Heat Shield (stage 3) | The rocket heats up 22% slower |
 
-Upgrades: **Shake It Harder** (+17% push), **Bigger Bottles** (+22% spray time),
-**Bigger Launch Pad** (build grid 5x5 -> 7x7 -> 9x9). Parts get a bit more expensive for
-every one you own. All numbers are in `Assets/Scripts/PartCatalog.cs`; the balance was
-tested with a flight simulator (first rocket about 100 m, around 7-9 flights to the Moon).
+Upgrades (8): **Shake It Harder** (+17% push), **Bigger Bottles** (+22% spray time), **Bigger
+Launch Pad** (grid 5x5 up to 11x11), **Lucky Coins** (+30% coin money), **Better Steering**,
+**Sponsor Deal** (+15% money per meter), and from stage 2 **Space Helmet** and **Tougher Crates**.
+Parts get a little more expensive for every one you own. All numbers are in
+`Assets/Scripts/PartCatalog.cs` and `Assets/Scripts/Stages.cs`; the balance was tested with a
+flight simulator.
+
+## Dev mode
+
+Menu > Settings > **Dev Mode**, type the dev password and press Enter. In the game press **F10**
+(or Pause > Dev Tools): add money, get 10 of every part, max all upgrades, god mode, infinite
+cola, and jump to any stage. The password is not stored in plain text in the code.
 
 ## Tools menu (Tools > Rocketee Man)
 
@@ -81,7 +110,8 @@ The build scene list (0 = Menu, 1 = Play) is also set automatically.
 | YardPlayer | Platformer controls |
 | BuildMode | The build grid and Auto Build |
 | Rocket / RocketPart | The rocket's physics, spraying, getting hit |
-| FlightDirector | Meteors, coins, clouds, the Moon, end of the flight |
+| FlightDirector | Meteors, fireballs, space junk, coins, clouds, the goal, end of the flight |
+| Stages | The three stages: distances, dangers and how each one looks |
 | Scenery | Sky gradient, stars, sun, growing Moon, planets, parallax mountains and dunes, birds/balloons/planes/satellites/UFO, tumbleweeds |
 | YardBuilder | Makes the simple flat yard with my tiles, bigger cacti, decorations, where things go |
 | GameUI / UIKit | Everything on screen |

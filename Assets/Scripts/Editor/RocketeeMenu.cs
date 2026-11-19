@@ -73,7 +73,7 @@ public static class RocketeeMenu
         if (pad != null)
             pad.FixSize();
 
-        YardBuilder.Decorate(left, right);
+        YardBuilder.Decorate(left, right, Stages.Get(0).decorations);
 
         EditorSceneManager.MarkSceneDirty(play);
         EditorSceneManager.SaveScene(play);

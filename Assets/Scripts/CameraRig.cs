@@ -81,8 +81,8 @@ public class CameraRig : MonoBehaviour
                 // The grid sits in the upper part of the screen so the build bar at the
                 // bottom never covers the lowest row
                 float grid = game.Data.GridSize;
-                size = Mathf.Max(yardSize, (grid + 1f) / 1.4f + 0.5f);
-                target = game.Pad.GridOrigin + Vector2.up * (0.4f * size);
+                size = Mathf.Max(yardSize, (grid + 1f) / 1.32f + 0.5f);
+                target = game.Pad.GridOrigin + Vector2.up * (0.32f * size);
                 break;
 
             case GameState.Flight:

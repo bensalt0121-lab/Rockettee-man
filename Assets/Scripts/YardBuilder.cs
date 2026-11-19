@@ -9,8 +9,9 @@
  *              shop (left), launch pad (middle), your cacti (right, twice as big), the starter
  *              parts and a few desert decorations.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.1
+ * VERSION: 1.2
  * VERSION 1.1: Smaller flat yard (no floating platforms), bigger cacti and decorations.
+ * VERSION 1.2: Stages: Moon and Mars ground tiles, no cacti off Earth, decorations per stage.
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -42,17 +43,6 @@ public static class YardBuilder
         ("starter_crate_2", PartType.Crate, 7.8f),
     };
 
-    // Decorations: sprite, world x, size in pixels, how much bigger to draw it
-    static readonly (string sprite, float x, int w, int h, float scale)[] Decorations =
-    {
-        ("rock_1", -15.1f, 32, 16, 1.5f),
-        ("sign_shop", -9.8f, 32, 32, 1.5f),
-        ("sign_launch", -0.6f, 32, 32, 1.5f),
-        ("rock_2", 5f, 16, 16, 1.5f),
-        ("bush", 13.4f, 32, 24, 1.75f),
-        ("small_cactus", 15f, 16, 32, 2f),
-    };
-
     public const string DecorationsName = "Yard Decorations";
 
     // The ground tilemap (the first one with a Tilemap Collider 2D)
@@ -68,28 +58,10 @@ public static class YardBuilder
         if (map == null)
             return 0;
 
-        // The top row of the ground is the highest row that is mostly full
-        // (rows with only a few tiles are floating platforms)
         BoundsInt bounds = map.cellBounds;
-        Dictionary<int, int> tilesInRow = new Dictionary<int, int>();
-        int fullest = 0;
-        foreach (Vector3Int cell in bounds.allPositionsWithin)
-        {
-            if (!map.HasTile(cell))
-                continue;
-            tilesInRow.TryGetValue(cell.y, out int count);
-            tilesInRow[cell.y] = count + 1;
-            fullest = Mathf.Max(fullest, count + 1);
-        }
-        if (fullest == 0)
+        int topRow = GroundTopRow(map);
+        if (topRow == int.MinValue)
             return 0;
-
-        int topRow = int.MinValue;
-        foreach (var row in tilesInRow)
-        {
-            if (row.Value * 2 >= fullest)
-                topRow = Mathf.Max(topRow, row.Key);
-        }
 
         // Which tiles you used on top and underneath (each as often as you used it, so the mix stays)
         List<TileBase> topTiles = new List<TileBase>();
@@ -154,6 +126,86 @@ public static class YardBuilder
         return tiles[Mathf.Abs(hash) % tiles.Count];
     }
 
+    // The top row of the ground is the highest row that is mostly full
+    // (rows with only a few tiles would be floating platforms)
+    static int GroundTopRow(Tilemap map)
+    {
+        Dictionary<int, int> tilesInRow = new Dictionary<int, int>();
+        int fullest = 0;
+        foreach (Vector3Int cell in map.cellBounds.allPositionsWithin)
+        {
+            if (!map.HasTile(cell))
+                continue;
+            tilesInRow.TryGetValue(cell.y, out int count);
+            tilesInRow[cell.y] = count + 1;
+            fullest = Mathf.Max(fullest, count + 1);
+        }
+
+        int topRow = int.MinValue;
+        foreach (var row in tilesInRow)
+        {
+            if (fullest > 0 && row.Value * 2 >= fullest)
+                topRow = Mathf.Max(topRow, row.Key);
+        }
+        return topRow;
+    }
+
+    // ---------- How each stage looks (only while playing, your scene keeps the sand) ----------
+
+    public static void ApplyStage(StageInfo stage, float left, float right)
+    {
+        // Moon or Mars ground instead of sand
+        if (stage.topTile != null && SpriteLib.Has(stage.topTile))
+            SwapGroundTiles(Ground(), stage);
+
+        // Cacti only grow on Earth
+        foreach (SpriteRenderer cactus in Cacti())
+            cactus.gameObject.SetActive(stage.showCacti);
+
+        Decorate(left, right, stage.decorations);
+    }
+
+    static void SwapGroundTiles(Tilemap map, StageInfo stage)
+    {
+        if (map == null)
+            return;
+
+        int topRow = GroundTopRow(map);
+        Tile top = MakeTile(stage.topTile);
+        Tile deep = MakeTile(stage.deepTile != null && SpriteLib.Has(stage.deepTile) ? stage.deepTile : stage.topTile);
+
+        foreach (Vector3Int cell in map.cellBounds.allPositionsWithin)
+        {
+            if (map.HasTile(cell))
+                map.SetTile(cell, cell.y == topRow ? top : deep);
+        }
+
+        TilemapCollider2D collider = map.GetComponent<TilemapCollider2D>();
+        if (collider != null && Application.isPlaying)
+            collider.ProcessTilemapChanges();
+    }
+
+    static Tile MakeTile(string spriteName)
+    {
+        Tile tile = ScriptableObject.CreateInstance<Tile>();
+        tile.sprite = SpriteLib.Get(spriteName, Color.gray);
+        tile.colliderType = Tile.ColliderType.Grid;
+        return tile;
+    }
+
+    // Your cacti: objects named "cactus..." at the top of the scene
+    static List<SpriteRenderer> Cacti()
+    {
+        List<SpriteRenderer> cacti = new List<SpriteRenderer>();
+        foreach (SpriteRenderer renderer in Object.FindObjectsByType<SpriteRenderer>())
+        {
+            if (renderer.gameObject.name.ToLower().StartsWith("cactus") && renderer.transform.parent == null)
+                cacti.Add(renderer);
+        }
+        cacti.Sort((a, b) => string.CompareOrdinal(a.gameObject.name, b.gameObject.name));
+        return cacti;
+    }
+
     // Puts the shop, launch pad, cacti, starter parts and player at their spots
     public static void PlaceYardObjects(float left, float right)
     {
@@ -184,14 +236,7 @@ public static class YardBuilder
     // Your cacti (objects named "cactus...") go on the right, twice as big, standing on the ground
     public static void ArrangeCacti(float left, float right)
     {
-        List<SpriteRenderer> cacti = new List<SpriteRenderer>();
-        foreach (SpriteRenderer renderer in Object.FindObjectsByType<SpriteRenderer>())
-        {
-            if (renderer.gameObject.name.ToLower().StartsWith("cactus") && renderer.transform.parent == null)
-                cacti.Add(renderer);
-        }
-        cacti.Sort((a, b) => string.CompareOrdinal(a.gameObject.name, b.gameObject.name));
-
+        List<SpriteRenderer> cacti = Cacti();
         for (int i = 0; i < cacti.Count && i < CactusX.Length; i++)
         {
             Transform cactus = cacti[i].transform;
@@ -205,8 +250,8 @@ public static class YardBuilder
         }
     }
 
-    // Rocks, a bush, a small cactus and signs (made again each time so they match the yard)
-    public static GameObject Decorate(float left, float right)
+    // Rocks, signs and other decorations of a stage (made again each time so they match the yard)
+    public static GameObject Decorate(float left, float right, (string sprite, float x, int w, int h, float scale)[] decorations)
     {
         GameObject old = GameObject.Find(DecorationsName);
         if (old != null)
@@ -218,7 +263,7 @@ public static class YardBuilder
         }
 
         GameObject holder = new GameObject(DecorationsName);
-        foreach (var decoration in Decorations)
+        foreach (var decoration in decorations)
         {
             if (!SpriteLib.Has(decoration.sprite))
                 continue;

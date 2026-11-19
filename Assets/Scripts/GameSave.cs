@@ -1,11 +1,13 @@
 /*********************************************************************************************
  * COMPONENT OF: none (saved data, kept in PlayerPrefs)
- * REQUIRED DEPENDENCIES: PartCatalog
- * DESCRIPTION: Everything the game remembers between plays: money, best height, which parts
- *              you own, your upgrades, the rocket you built and the parts you already picked
- *              up in the yard. Tools > Rocketee Man > Reset Saved Progress clears it.
+ * REQUIRED DEPENDENCIES: PartCatalog, Stages
+ * DESCRIPTION: Everything the game remembers between plays: money, which stage you are on,
+ *              your best height in each stage, which parts you own, your upgrades, the rocket
+ *              you built and the parts you already picked up in the yard.
+ *              Tools > Rocketee Man > Reset Saved Progress (or Settings > Reset) clears it.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.0
+ * VERSION: 1.1
+ * VERSION 1.1: Stages (current stage, best height and milestones per stage), helmet level.
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -23,14 +25,28 @@ public class GameSave
 {
     // A little money to start with
     public int money = 20;
-    // How many height milestones (100, 250, 500, 750 m) already paid their bonus
-    public int milestones;
-    public float bestHeight;
     public int flights;
-    public bool reachedMoon;
+    // Level of every upgrade (index = UpgradeType)
+    public int[] upgrades = new int[0];
+
+    // Old saves kept these separately; they are moved into the upgrades list
     public int thrustLevel;
     public int fuelLevel;
     public int gridLevel;
+
+    // Stage you are on now (0 = Earth to Moon, 1 = Moon to Mars, 2 = Mars to the Sun)
+    public int stage;
+    // How many stages you finished (3 = you reached the Sun)
+    public int stagesCleared;
+    // Best height and paid milestones for each stage
+    public float[] stageBest = new float[0];
+    public int[] stageMilestones = new int[0];
+
+    // Old saves (before stages) used these; they are moved into the stage lists
+    public float bestHeight;
+    public int milestones;
+    public bool reachedMoon;
+
     // How many of each part you own (index = PartType)
     public int[] owned = new int[0];
     // The rocket you built: grid position and part type
@@ -78,13 +94,41 @@ public class GameSave
     // Makes old or broken saves safe to use
     void FixUp()
     {
-        if (owned == null || owned.Length != PartCatalog.Count)
+        owned = Resize(owned, PartCatalog.Count);
+        stageMilestones = Resize(stageMilestones, Stages.Count);
+        upgrades = Resize(upgrades, PartCatalog.Upgrades.Length);
+
+        // Moves old upgrade levels into the upgrades list
+        upgrades[(int)UpgradeType.Thrust] = Mathf.Max(upgrades[(int)UpgradeType.Thrust], thrustLevel);
+        upgrades[(int)UpgradeType.Fuel] = Mathf.Max(upgrades[(int)UpgradeType.Fuel], fuelLevel);
+        upgrades[(int)UpgradeType.Grid] = Mathf.Max(upgrades[(int)UpgradeType.Grid], gridLevel);
+        thrustLevel = 0;
+        fuelLevel = 0;
+        gridLevel = 0;
+        for (int i = 0; i < upgrades.Length; i++)
+            upgrades[i] = Mathf.Clamp(upgrades[i], 0, PartCatalog.Upgrades[i].prices.Length);
+
+        if (stageBest == null || stageBest.Length != Stages.Count)
         {
-            int[] fixedOwned = new int[PartCatalog.Count];
-            if (owned != null)
-                System.Array.Copy(owned, fixedOwned, Mathf.Min(owned.Length, fixedOwned.Length));
-            owned = fixedOwned;
+            float[] best = new float[Stages.Count];
+            if (stageBest != null)
+                System.Array.Copy(stageBest, best, Mathf.Min(stageBest.Length, best.Length));
+            stageBest = best;
         }
+
+        // Moves an old save (before stages) into stage 1
+        if (bestHeight > stageBest[0])
+            stageBest[0] = bestHeight;
+        if (milestones > stageMilestones[0])
+            stageMilestones[0] = milestones;
+        if (reachedMoon && stagesCleared == 0)
+        {
+            stagesCleared = 1;
+            stage = 1;
+        }
+        bestHeight = 0f;
+        milestones = 0;
+        reachedMoon = false;
 
         if (layout == null)
             layout = new List<PlacedPart>();
@@ -92,10 +136,35 @@ public class GameSave
             collected = new List<string>();
 
         layout.RemoveAll(p => p == null || (int)p.type < 0 || (int)p.type >= PartCatalog.Count);
-        gridLevel = Mathf.Clamp(gridLevel, 0, PartCatalog.GridSizes.Length - 1);
+        stage = Mathf.Clamp(stage, 0, Stages.Count - 1);
+        stagesCleared = Mathf.Clamp(stagesCleared, 0, Stages.Count);
     }
 
-    public int GridSize => PartCatalog.GridSizes[Mathf.Clamp(gridLevel, 0, PartCatalog.GridSizes.Length - 1)];
+    static int[] Resize(int[] values, int length)
+    {
+        if (values != null && values.Length == length)
+            return values;
+        int[] resized = new int[length];
+        if (values != null)
+            System.Array.Copy(values, resized, Mathf.Min(values.Length, length));
+        return resized;
+    }
+
+    public StageInfo Stage => Stages.Get(stage);
+
+    // Best height in the stage you are on now
+    public float Best
+    {
+        get => stageBest[stage];
+        set => stageBest[stage] = value;
+    }
+
+    public int Level(UpgradeType type)
+    {
+        return upgrades[(int)type];
+    }
+
+    public int GridSize => PartCatalog.GridSizes[Mathf.Clamp(Level(UpgradeType.Grid), 0, PartCatalog.GridSizes.Length - 1)];
 
     public int Owned(PartType type)
     {
@@ -119,6 +188,12 @@ public class GameSave
         return Owned(type) - Placed(type);
     }
 
+    // Sold in the shop at this stage?
+    public bool Unlocked(PartInfo info)
+    {
+        return info.unlockStage <= stage;
+    }
+
     public PlacedPart At(int x, int y)
     {
         foreach (PlacedPart part in layout)
@@ -129,6 +204,22 @@ public class GameSave
         return null;
     }
 
-    public float ThrustMultiplier => 1f + thrustLevel * PartCatalog.ThrustPerLevel;
-    public float FuelMultiplier => 1f + fuelLevel * PartCatalog.FuelPerLevel;
+    public bool Unlocked(UpgradeInfo info)
+    {
+        return info.unlockStage <= stage;
+    }
+
+    public float ThrustMultiplier => 1f + Level(UpgradeType.Thrust) * PartCatalog.ThrustPerLevel;
+    public float FuelMultiplier => 1f + Level(UpgradeType.Fuel) * PartCatalog.FuelPerLevel;
+    public float CoinMultiplier => 1f + Level(UpgradeType.LuckyCoins) * PartCatalog.CoinsPerLevel;
+    public float SteeringMultiplier => 1f + Level(UpgradeType.Steering) * PartCatalog.SteeringPerLevel;
+    public float MoneyPerMeterMultiplier => 1f + Level(UpgradeType.Sponsor) * PartCatalog.SponsorPerLevel;
+
+    // Extra hits for the seat (helmet) and for crates (tougher crates)
+    public int ExtraHits(PartInfo info)
+    {
+        if (info.type == PartType.Seat)
+            return Level(UpgradeType.Helmet);
+        return info.isCrate ? Level(UpgradeType.ToughCrates) : 0;
+    }
 }

@@ -71,6 +71,14 @@ public class YardPlayer : MonoBehaviour
         solidOnly.useTriggers = false;
     }
 
+    void Start()
+    {
+        // Low gravity on the Moon and Mars: big floaty jumps
+        RocketeeGame game = RocketeeGame.Instance;
+        if (game != null)
+            body.gravityScale = gravityScale * game.Data.Stage.yardGravity;
+    }
+
     void Update()
     {
         RocketeeGame game = RocketeeGame.Instance;

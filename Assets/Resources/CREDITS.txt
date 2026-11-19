@@ -33,6 +33,16 @@ Drawn for this project (made with code, no outside source). Free to use:
                       the dune colours are taken from the "sand tile 1.png" made for this game)
     Desert props:     rock_1.png, rock_2.png, bush.png, small_cactus.png (colours from the game's
                       cactus art), skull.png, tumbleweed.png, sign_shop.png, sign_launch.png
+    Stage 2/3 parts:  tank.png, tank_big.png, crate_titanium.png, cooler.png, heat_shield.png,
+                      mentos.png (a plain mint-candy roll, no brand logo), wing.png, magnet.png,
+                      bubble_shield.png
+    Hazards:          debris.png, fireball.png
+    Planets:          mars.png, sun_big.png, earth.png
+    Stage scenery:    bg_moon_hills.png, bg_mars_hills.png (both tile seamlessly left-right),
+                      moon_rock.png, crater.png, flag.png (made-up flag, no real country),
+                      mars_rock.png, mars_crystal.png
+    Ground tiles:     moon_top.png, moon_deep.png, mars_top.png, mars_deep.png - re-coloured copies of
+                      this game's own "sand tile 1.png" / "deep sand.png" (same pixel layout, new colours)
     The "COLA" bottle is a made-up generic brand (no real logos).
 
 
@@ -67,6 +77,12 @@ wind_loop.ogg   <- wind woosh loop.ogg         "wind whoosh loop" by SketchMan3 
                     https://opengameart.org/content/loopable-dungeon-ambience)
 launch.mp3      <- glass_bottle_open.mp3       "glass bottle (open & close)" by sinny - CC0
                    https://opengameart.org/content/glass-bottle-open-close
+fire_loop.ogg   <- fire-1.ogg                  "Fire Crackling" (fireplace recording) by AntumDeluge - CC0
+                   https://opengameart.org/content/fire-crackling
+alarm.ogg       <- alarm_03.ogg                "30 CC0 SFX loops" by rubberduck - CC0
+                   https://opengameart.org/content/30-cc0-sfx-loops
+metal_hit.ogg   <- metal_hit_04.ogg            "100 CC0 metal and wood SFX" by rubberduck - CC0
+                   https://opengameart.org/content/100-cc0-metal-and-wood-sfx
 
 
 MUSIC  (Assets/Resources/Audio)

@@ -1,14 +1,16 @@
 /*********************************************************************************************
  * COMPONENT OF: Rocketee Game (added by the game)
- * REQUIRED DEPENDENCIES: RocketeeGame, Rocket, Meteor, SkyCoin, sprites cloud_1-3 and moon
- * DESCRIPTION: Everything that happens during a flight. It puts meteors and coins above you
- *              (more meteors the higher you go), places the clouds and the Moon, and decides
- *              when the flight is over: when you crash, when you run out of cola and start
- *              falling, or when you reach the Moon. (The sky colors, stars, sun, planets and
- *              background hills are in Scenery.)
+ * REQUIRED DEPENDENCIES: RocketeeGame, Rocket, Meteor, SkyCoin, Stages, sprites cloud_1-3 and
+ *                        the goal sprite of each stage (moon, mars, sun_big)
+ * DESCRIPTION: Everything that happens during a flight in the current stage. It puts meteors
+ *              (and fireballs near the Sun), space junk and coins in your way, places the
+ *              clouds and the goal (Moon, Mars or Sun), and decides when the flight is over:
+ *              when you crash, when you run out of cola and start falling, or when you reach
+ *              the goal. (Sky colors, stars, sun, planets and hills are in Scenery.)
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.1
+ * VERSION: 1.2
  * VERSION 1.1: Easier: meteors start higher and are farther apart, coins are worth more.
+ * VERSION 1.2: Stages: each stage has its own goal, meteor storm, space junk and fireballs.
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -16,14 +18,8 @@ using UnityEngine.InputSystem;
 
 public class FlightDirector : MonoBehaviour
 {
-    [Header("Meteors")]
-    // Meters between meteors where they start, and near the Moon
-    public float meteorGapLow = 18f;
-    public float meteorGapHigh = 6f;
     // How far left and right of the rocket meteors appear
     public float spawnWidth = 9f;
-
-    [Header("Coins")]
     public float coinGap = 16f;
 
     public float Height { get; private set; }
@@ -33,22 +29,27 @@ public class FlightDirector : MonoBehaviour
     public bool Active { get; private set; }
 
     private RocketeeGame game;
+    private StageInfo stage;
     private readonly List<GameObject> spawned = new List<GameObject>();
     private float nextMeteor;
     private float nextCoin;
+    private float nextJunk;
     private float endTimer;
     private float flightTime;
 
     void Start()
     {
         game = RocketeeGame.Instance;
-        MakeClouds();
-        MakeMoon();
+        stage = game.Data.Stage;
+        if (stage.clouds)
+            MakeClouds();
+        MakeGoal();
     }
 
     public void Begin()
     {
         Clear();
+        stage = game.Data.Stage;
         Active = true;
         Height = 0f;
         MaxHeight = 0f;
@@ -56,8 +57,9 @@ public class FlightDirector : MonoBehaviour
         CoinCount = 0;
         endTimer = 0f;
         flightTime = 0f;
-        nextMeteor = game.firstMeteorHeight;
+        nextMeteor = stage.firstMeteor;
         nextCoin = 12f;
+        nextJunk = stage.junkGap > 0f ? stage.firstMeteor + stage.junkGap : float.MaxValue;
     }
 
     // Removes this flight's meteors and coins
@@ -90,10 +92,11 @@ public class FlightDirector : MonoBehaviour
 
         SpawnAhead(rocket);
 
-        if (Height >= game.moonHeight)
+        // A crashed rocket that coasts past the goal does not count
+        if (Height >= stage.goalHeight && !rocket.Crashed)
         {
             Active = false;
-            game.ReachMoon();
+            game.ReachGoal();
             return;
         }
 
@@ -106,22 +109,40 @@ public class FlightDirector : MonoBehaviour
         CheckEnd(rocket);
     }
 
-    // Puts meteors and coins a little above the rocket before you get there
+    // Puts meteors, junk and coins a little above the rocket before you get there
     void SpawnAhead(Rocket rocket)
     {
         float lookAhead = Height + 16f;
         float x = rocket.transform.position.x;
+        float goal = stage.goalHeight;
 
-        while (nextMeteor < lookAhead && nextMeteor < game.moonHeight - 10f)
+        while (nextMeteor < lookAhead && nextMeteor < goal - 10f)
         {
-            float t = Mathf.InverseLerp(game.firstMeteorHeight, game.moonHeight, nextMeteor);
-            int size = Random.value < Mathf.Lerp(0.05f, 0.3f, t) ? 3 : Random.value < 0.5f ? 2 : 1;
+            float t = Mathf.InverseLerp(stage.firstMeteor, goal, nextMeteor);
             Vector2 spot = new Vector2(x + Random.Range(-spawnWidth, spawnWidth), rocket.LaunchHeight + nextMeteor);
-            spawned.Add(Meteor.Spawn(spot, size).gameObject);
-            nextMeteor += Mathf.Lerp(meteorGapLow, meteorGapHigh, t) * Random.Range(0.7f, 1.3f);
+
+            if (Random.value < stage.fireballChance)
+            {
+                spawned.Add(Meteor.SpawnFireball(spot).gameObject);
+            }
+            else
+            {
+                int size = Random.value < Mathf.Lerp(0.05f, stage.bigMeteorChance, t) ? 3 : Random.value < 0.5f ? 2 : 1;
+                spawned.Add(Meteor.Spawn(spot, size).gameObject);
+            }
+            nextMeteor += Mathf.Lerp(stage.meteorGapLow, stage.meteorGapHigh, t) * Random.Range(0.7f, 1.3f);
         }
 
-        while (nextCoin < lookAhead)
+        // Space junk comes in from the side of the screen
+        while (nextJunk < lookAhead && nextJunk < goal - 10f)
+        {
+            float direction = Random.value < 0.5f ? -1f : 1f;
+            Vector2 spot = new Vector2(x - direction * 14f, rocket.LaunchHeight + nextJunk);
+            spawned.Add(Meteor.SpawnJunk(spot, direction).gameObject);
+            nextJunk += stage.junkGap * Random.Range(0.6f, 1.4f);
+        }
+
+        while (nextCoin < lookAhead && nextCoin < goal)
         {
             // Coins are worth more the higher they are
             int value = 6 + Mathf.FloorToInt(nextCoin / 100f) * 3;
@@ -145,6 +166,11 @@ public class FlightDirector : MonoBehaviour
         {
             over = true;
             wait = 2.5f;
+        }
+        else if (rocket.transform.position.y < game.GroundY - 5f)
+        {
+            // Fell below the ground somehow
+            over = true;
         }
         else if (!rocket.HasFuel && rocket.Body.linearVelocity.y < -0.5f)
         {
@@ -181,6 +207,8 @@ public class FlightDirector : MonoBehaviour
         string[] names = { "cloud_1", "cloud_2", "cloud_3" };
         int[] widths = { 64, 96, 48 };
         int[] heights = { 32, 40, 24 };
+        // Mars has thin orange dust clouds
+        Color tint = game.Data.stage == 0 ? new Color(1f, 1f, 1f, 0.9f) : new Color(1f, 0.75f, 0.55f, 0.6f);
 
         for (float height = 6f; height < 260f; height += Random.Range(5f, 11f))
         {
@@ -188,15 +216,16 @@ public class FlightDirector : MonoBehaviour
             Sprite sprite = SpriteLib.Get(names[pick], Color.white, widths[pick], heights[pick]);
             SpriteRenderer cloud = SpriteLib.Show(holder, "Cloud", sprite, SpriteLib.UnitSize(sprite), -50);
             cloud.transform.position = new Vector3(centerX + Random.Range(-25f, 25f), game.GroundY + height, 0f);
-            cloud.color = new Color(1f, 1f, 1f, 0.9f);
+            cloud.color = tint;
         }
     }
 
-    void MakeMoon()
+    // The Moon, Mars or the Sun, waiting at the top
+    void MakeGoal()
     {
         float centerX = game.Pad != null ? game.Pad.transform.position.x : 0f;
-        Sprite sprite = SpriteLib.Get("moon", new Color(0.8f, 0.8f, 0.78f), 256, 256);
-        SpriteRenderer moon = SpriteLib.Show(null, "Moon", sprite, Vector2.one * 8f, -40);
-        moon.transform.position = new Vector3(centerX, game.GroundY + game.moonHeight + 5f, 0f);
+        Sprite sprite = SpriteLib.Get(stage.goalSprite, new Color(0.8f, 0.8f, 0.78f), 256, 256);
+        SpriteRenderer goal = SpriteLib.Show(null, "Goal - " + stage.goalName, sprite, Vector2.one * stage.goalSize, -40);
+        goal.transform.position = new Vector3(centerX, game.GroundY + stage.goalHeight + stage.goalSize * 0.6f, 0f);
     }
 }

@@ -103,8 +103,13 @@ public static class UIKit
     {
         Image image = Image(parent, "Button", color);
         Button button = image.gameObject.AddComponent<Button>();
+        // No keyboard navigation: otherwise the last clicked button stays "selected" and
+        // pressing Enter later would click it again
+        button.navigation = new Navigation { mode = Navigation.Mode.None };
         button.onClick.AddListener(() =>
         {
+            if (EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(null);
             Sfx.Play("click", 0.5f);
             onClick();
         });

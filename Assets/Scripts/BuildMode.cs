@@ -111,10 +111,12 @@ public class BuildMode : MonoBehaviour
 
         if (keyboard != null)
         {
-            for (int i = 0; i < PartCatalog.Count && i < 9; i++)
+            // Number keys pick the parts in the order of the build bar
+            var barParts = game.UI.BuildBarParts;
+            for (int i = 0; i < barParts.Count && i < 9; i++)
             {
                 if (keyboard[Key.Digit1 + i].wasPressedThisFrame)
-                    Select((PartType)i);
+                    Select(barParts[i]);
             }
 
 #if UNITY_EDITOR
@@ -170,6 +172,9 @@ public class BuildMode : MonoBehaviour
 
     bool CanPlace(Vector2Int cell, PartType type)
     {
+        // Only one seat on a rocket
+        if (type == PartType.Seat && game.Data.Placed(PartType.Seat) > 0)
+            return false;
         return game.Data.At(cell.x, cell.y) == null && game.Data.Available(type) > 0;
     }
 
@@ -242,7 +247,7 @@ public class BuildMode : MonoBehaviour
             int width = 0;
             for (int c = 1; c <= Mathf.Min(half, widthBelow); c++)
             {
-                PartType engine = left[(int)PartType.BigCola] >= 2 ? PartType.BigCola : PartType.Cola;
+                PartType engine = left[(int)PartType.BigCola] >= 2 ? PartType.BigCola : left[(int)PartType.Cola] >= 2 ? PartType.Cola : PartType.Mentos;
                 if (left[(int)engine] < 2 || !Free(-c, y) || !Free(c, y))
                     break;
                 Put(-c, y, engine);
@@ -255,7 +260,7 @@ public class BuildMode : MonoBehaviour
         }
 
         // An odd cola goes right above the seat, in the middle, so it still pushes straight
-        foreach (PartType engine in new[] { PartType.BigCola, PartType.Cola })
+        foreach (PartType engine in new[] { PartType.BigCola, PartType.Cola, PartType.Mentos })
         {
             while (left[(int)engine] > 0)
             {
@@ -276,12 +281,12 @@ public class BuildMode : MonoBehaviour
             Put(edge + 1, 0, PartType.Fin);
         }
 
-        // Crates stacked on top of every column as armor (metal ones first)
+        // Tanks, shields and crates stacked on top of every column (strongest armor last, on top)
         bool placedSomething = true;
         while (placedSomething)
         {
             placedSomething = false;
-            foreach (PartType crate in new[] { PartType.MetalCrate, PartType.Crate })
+            foreach (PartType crate in new[] { PartType.Tank, PartType.BigTank, PartType.Cooler, PartType.HeatShield, PartType.BubbleShield, PartType.Magnet, PartType.TitaniumCrate, PartType.MetalCrate, PartType.Crate })
             {
                 if (left[(int)crate] >= 1 && Free(0, Top(0) + 1))
                 {

@@ -1,19 +1,22 @@
 /*********************************************************************************************
  * COMPONENT OF: Rocketee Game (added by the game)
- * REQUIRED DEPENDENCIES: RocketeeGame, CameraRig, sprites bg_mountains, bg_dunes, sun, moon,
+ * REQUIRED DEPENDENCIES: RocketeeGame, CameraRig, Stages, sprites (bg_mountains, bg_dunes,
+ *                        bg_moon_hills, bg_mars_hills, sun, moon, mars, sun_big, earth,
  *                        planet_1, planet_2, bird_1, bird_2, balloon, plane, satellite, ufo,
- *                        tumbleweed (anything missing is just left out)
- * DESCRIPTION: Makes the view more interesting:
- *              - a sky that fades from a warm desert horizon to blue, then to black space
- *              - desert mountains and dunes behind the yard that move slower than the camera
- *                (parallax), so the world looks deep
- *              - the sun, a Moon in the sky that grows as you get closer to it, planets and
- *                twinkling stars in space
- *              - things to fly past: birds, hot air balloons, planes, satellites and a UFO,
- *                each at its own height, plus tumbleweeds rolling through the yard
+ *                        tumbleweed) - anything missing is just left out
+ * DESCRIPTION: Makes the view more interesting, different for every stage:
+ *              - a sky that changes color as you climb (desert blue on Earth, black on the
+ *                Moon, dusty orange on Mars, glowing near the Sun)
+ *              - hills (and dunes on Earth) behind the yard that move slower than the camera
+ *                (parallax), plus ground that goes on far past the yard
+ *              - the sun, the goal (Moon, Mars or Sun) in the sky that grows as you get closer,
+ *                Earth seen from the Moon, planets and twinkling stars in space
+ *              - things to fly past: birds, balloons and planes on Earth, satellites and a UFO
+ *                higher up, tumbleweeds rolling through the desert yard
  *              Only for looks: none of it can be hit.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.0
+ * VERSION: 1.1
+ * VERSION 1.1: Stages (Moon and Mars look), far ground.
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -23,27 +26,10 @@ using UnityEngine;
 public class Scenery : MonoBehaviour
 {
     [Header("Parallax (1 = moves with the camera, 0 = stays still)")]
-    public float mountainsFollow = 0.85f;
+    public float hillsFollow = 0.85f;
     public float dunesFollow = 0.6f;
 
-    // Sky colors (bottom, top) at these heights
-    static readonly float[] SkyHeights = { 0f, 150f, 350f, 600f };
-    static readonly Color[] SkyBottom =
-    {
-        new Color(1f, 0.86f, 0.62f),
-        new Color(0.62f, 0.82f, 0.98f),
-        new Color(0.2f, 0.25f, 0.55f),
-        new Color(0.05f, 0.05f, 0.14f),
-    };
-    static readonly Color[] SkyTop =
-    {
-        new Color(0.38f, 0.68f, 0.98f),
-        new Color(0.22f, 0.45f, 0.88f),
-        new Color(0.05f, 0.06f, 0.2f),
-        new Color(0.01f, 0.01f, 0.04f),
-    };
-
-    // Things that fly past: sprite(s), lowest and highest height, how many at once, speed, size
+    // Things that fly past. low/high are parts of the way to the goal (0.07 = 7%).
     class CritterKind
     {
         public string name;
@@ -55,15 +41,16 @@ public class Scenery : MonoBehaviour
         public float slowest;
         public float fastest;
         public Vector2 size;
+        public bool earthOnly;
     }
 
     static readonly CritterKind[] Kinds =
     {
-        new CritterKind { name = "Bird", spriteA = "bird_1", spriteB = "bird_2", low = 3f, high = 70f, max = 3, slowest = 2f, fastest = 3.5f, size = new Vector2(0.5f, 0.5f) },
-        new CritterKind { name = "Balloon", spriteA = "balloon", low = 25f, high = 140f, max = 2, slowest = 0.3f, fastest = 0.8f, size = new Vector2(1f, 1.5f) },
-        new CritterKind { name = "Plane", spriteA = "plane", low = 70f, high = 230f, max = 1, slowest = 5f, fastest = 7f, size = new Vector2(1.5f, 0.75f) },
-        new CritterKind { name = "Satellite", spriteA = "satellite", low = 350f, high = 760f, max = 2, slowest = 0.4f, fastest = 1f, size = Vector2.one },
-        new CritterKind { name = "UFO", spriteA = "ufo", low = 650f, high = 980f, max = 1, slowest = 2.5f, fastest = 3.5f, size = new Vector2(1f, 0.5f) },
+        new CritterKind { name = "Bird", spriteA = "bird_1", spriteB = "bird_2", low = 0.003f, high = 0.07f, max = 3, slowest = 2f, fastest = 3.5f, size = new Vector2(0.5f, 0.5f), earthOnly = true },
+        new CritterKind { name = "Balloon", spriteA = "balloon", low = 0.025f, high = 0.14f, max = 2, slowest = 0.3f, fastest = 0.8f, size = new Vector2(1f, 1.5f), earthOnly = true },
+        new CritterKind { name = "Plane", spriteA = "plane", low = 0.07f, high = 0.23f, max = 1, slowest = 5f, fastest = 7f, size = new Vector2(1.5f, 0.75f), earthOnly = true },
+        new CritterKind { name = "Satellite", spriteA = "satellite", low = 0.35f, high = 0.76f, max = 2, slowest = 0.4f, fastest = 1f, size = Vector2.one },
+        new CritterKind { name = "UFO", spriteA = "ufo", low = 0.65f, high = 0.98f, max = 1, slowest = 2.5f, fastest = 3.5f, size = new Vector2(1f, 0.5f) },
     };
 
     class Critter
@@ -78,6 +65,7 @@ public class Scenery : MonoBehaviour
     }
 
     private RocketeeGame game;
+    private StageInfo stage;
     private Camera cam;
     private Transform camTransform;
     private float startCameraY;
@@ -89,10 +77,11 @@ public class Scenery : MonoBehaviour
     private Transform starHolder;
     private readonly List<(SpriteRenderer dot, float phase)> stars = new List<(SpriteRenderer, float)>();
     private SpriteRenderer sun;
-    private SpriteRenderer skyMoon;
+    private SpriteRenderer skyGoal;
+    private SpriteRenderer skyPlanet;
     private readonly List<(SpriteRenderer look, Vector2 spot)> planets = new List<(SpriteRenderer, Vector2)>();
 
-    private SpriteRenderer mountains;
+    private SpriteRenderer hills;
     private SpriteRenderer dunes;
 
     private readonly List<Critter> critters = new List<Critter>();
@@ -103,6 +92,7 @@ public class Scenery : MonoBehaviour
     void Start()
     {
         game = RocketeeGame.Instance;
+        stage = game.Data.Stage;
         cam = Camera.main;
         if (cam == null)
             return;
@@ -113,9 +103,12 @@ public class Scenery : MonoBehaviour
 
         MakeSky();
         MakeStars();
-        MakeSunMoonAndPlanets();
+        MakeSunGoalAndPlanets();
         MakeHills();
-        tumbleweedSprite = SpriteLib.Has("tumbleweed") ? SpriteLib.Get("tumbleweed", Color.gray, 24, 24) : null;
+        MakeFarGround();
+
+        if (stage.earthCritters && SpriteLib.Has("tumbleweed"))
+            tumbleweedSprite = SpriteLib.Get("tumbleweed", Color.gray, 24, 24);
     }
 
     // How high the camera is above where it starts in the yard
@@ -156,8 +149,9 @@ public class Scenery : MonoBehaviour
             return;
         lastSkyHeight = height;
 
-        Color bottom = SkyColor(SkyBottom, height);
-        Color top = SkyColor(SkyTop, height);
+        float way = height / stage.goalHeight;
+        Color bottom = SkyColor(stage.skyBottom, way);
+        Color top = SkyColor(stage.skyTop, way);
         for (int y = 0; y < 32; y++)
             skyTexture.SetPixel(0, y, Color.Lerp(bottom, top, y / 31f));
         skyTexture.Apply();
@@ -166,17 +160,18 @@ public class Scenery : MonoBehaviour
         cam.backgroundColor = top;
     }
 
-    static Color SkyColor(Color[] colors, float height)
+    static Color SkyColor(Color[] colors, float way)
     {
-        for (int i = 0; i < SkyHeights.Length - 1; i++)
+        float[] stops = Stages.SkyStops;
+        for (int i = 0; i < stops.Length - 1; i++)
         {
-            if (height <= SkyHeights[i + 1])
-                return Color.Lerp(colors[i], colors[i + 1], Mathf.InverseLerp(SkyHeights[i], SkyHeights[i + 1], height));
+            if (way <= stops[i + 1])
+                return Color.Lerp(colors[i], colors[i + 1], Mathf.InverseLerp(stops[i], stops[i + 1], way));
         }
         return colors[colors.Length - 1];
     }
 
-    // ---------- Stars, sun, Moon, planets ----------
+    // ---------- Stars, sun, goal, planets ----------
 
     void MakeStars()
     {
@@ -193,12 +188,17 @@ public class Scenery : MonoBehaviour
         }
     }
 
-    void MakeSunMoonAndPlanets()
+    void MakeSunGoalAndPlanets()
     {
-        if (SpriteLib.Has("sun"))
+        // The small sun in the corner (not in the stage that flies to the Sun itself)
+        if (SpriteLib.Has("sun") && stage.goalSprite != "sun_big")
             sun = SpriteLib.Show(camTransform, "Sun", SpriteLib.Get("sun", Color.yellow, 48, 48), Vector2.one * 1.6f, -85);
 
-        skyMoon = SpriteLib.Show(camTransform, "Sky Moon", SpriteLib.Get("moon", new Color(0.8f, 0.8f, 0.78f), 256, 256), Vector2.one, -82);
+        skyGoal = SpriteLib.Show(camTransform, "Sky Goal", SpriteLib.Get(stage.goalSprite, new Color(0.8f, 0.8f, 0.78f), 256, 256), Vector2.one, -82);
+
+        // Earth seen from the Moon
+        if (stage.skyPlanet != null && SpriteLib.Has(stage.skyPlanet))
+            skyPlanet = SpriteLib.Show(camTransform, "Sky Planet", SpriteLib.Get(stage.skyPlanet, Color.blue, 64, 64), Vector2.one * 1.8f, -83);
 
         if (SpriteLib.Has("planet_1"))
             planets.Add((SpriteLib.Show(camTransform, "Planet", SpriteLib.Get("planet_1", Color.gray, 64, 64), Vector2.one * 2.6f, -80), new Vector2(0.45f, 0.25f)));
@@ -210,9 +210,10 @@ public class Scenery : MonoBehaviour
     {
         float halfW = HalfWidth;
         float halfH = HalfHeight;
+        float way = height / stage.goalHeight;
 
-        // Stars fade in above 250 m and twinkle
-        float starAlpha = Mathf.InverseLerp(250f, 450f, height);
+        // Stars: always on the Moon, fading in higher up elsewhere; they twinkle
+        float starAlpha = stage.starsFromGround ? 1f : Mathf.InverseLerp(0.25f, 0.45f, way);
         starHolder.gameObject.SetActive(starAlpha > 0f);
         if (starAlpha > 0f)
         {
@@ -223,51 +224,41 @@ public class Scenery : MonoBehaviour
         if (sun != null)
             sun.transform.localPosition = new Vector3(-halfW + 2.2f, halfH - 1.8f, 28f);
 
-        // The Moon in the sky grows as you get closer, until the real Moon comes into view
-        float progress = Mathf.Clamp01(height / game.moonHeight);
-        skyMoon.gameObject.SetActive(height < game.moonHeight - 25f);
-        SpriteLib.Fit(skyMoon, Vector2.one * Mathf.Lerp(0.7f, 3.4f, Mathf.Pow(progress, 1.6f)));
-        skyMoon.transform.localPosition = new Vector3(halfW - 2.6f, halfH - 2.3f, 27f);
+        // The goal grows as you get closer, until the real one comes into view
+        float progress = Mathf.Clamp01(way);
+        skyGoal.gameObject.SetActive(height < stage.goalHeight - 25f);
+        SpriteLib.Fit(skyGoal, Vector2.one * Mathf.Lerp(0.7f, 3.4f, Mathf.Pow(progress, 1.6f)));
+        skyGoal.transform.localPosition = new Vector3(halfW - 2.6f, halfH - 2.3f, 27f);
+
+        // Earth sinks out of view as you fly away
+        if (skyPlanet != null)
+            skyPlanet.transform.localPosition = new Vector3(-halfW + 3f, halfH - 2.5f - way * halfH * 1.5f, 27f);
 
         // Planets show up in space and drift down slowly as you climb
-        float planetAlpha = Mathf.InverseLerp(380f, 620f, height);
+        float planetAlpha = stage.starsFromGround ? Mathf.InverseLerp(0.1f, 0.3f, way) : Mathf.InverseLerp(0.38f, 0.62f, way);
         foreach (var planet in planets)
         {
             planet.look.gameObject.SetActive(planetAlpha > 0f);
             planet.look.color = new Color(1f, 1f, 1f, planetAlpha);
-            float drift = (height - 500f) * 0.004f;
+            float drift = (way - 0.5f) * 4f;
             planet.look.transform.localPosition = new Vector3(planet.spot.x * halfW, planet.spot.y * halfH - drift, 26f);
         }
     }
 
-    // ---------- Background hills (parallax) ----------
+    // ---------- Background hills (parallax) and far ground ----------
 
     void MakeHills()
     {
-        mountains = MakeTiledLayer("bg_mountains", "Far Mountains", -48);
-        dunes = MakeTiledLayer("bg_dunes", "Dunes", -46);
-        MakeFarGround();
-    }
-
-    // Sand that goes on far past the yard, so when the camera zooms out in flight the yard
-    // does not look like a floating island. Same colors as your sand tiles; your tiles are
-    // drawn on top of it inside the yard.
-    void MakeFarGround()
-    {
-        Transform holder = new GameObject("Far Ground").transform;
-        Color topSand = new Color(136f / 255f, 91f / 255f, 0f);
-        Color deepSand = new Color(97f / 255f, 65f / 255f, 0f);
-
-        SpriteRenderer top = SpriteLib.Show(holder, "Top Sand", SpriteLib.Solid(topSand), new Vector2(2000f, 1f), -44);
-        top.transform.position = new Vector3(0f, game.GroundY - 0.5f, 0f);
-
-        SpriteRenderer deep = SpriteLib.Show(holder, "Deep Sand", SpriteLib.Solid(deepSand), new Vector2(2000f, 60f), -44);
-        deep.transform.position = new Vector3(0f, game.GroundY - 1f - 30f, 0f);
+        hills = MakeTiledLayer(stage.hills, "Far Hills", -48);
+        if (hills != null)
+            hills.color = stage.hillsTint;
+        if (stage.dunes)
+            dunes = MakeTiledLayer("bg_dunes", "Dunes", -46);
     }
 
     SpriteRenderer MakeTiledLayer(string spriteName, string objectName, int order)
     {
-        if (!SpriteLib.Has(spriteName))
+        if (spriteName == null || !SpriteLib.Has(spriteName))
             return null;
 
         Sprite sprite = SpriteLib.Get(spriteName, Color.gray);
@@ -286,10 +277,23 @@ public class Scenery : MonoBehaviour
         return layer;
     }
 
+    // Ground that goes on far past the yard (same colors as the ground tiles), so when the
+    // camera zooms out in flight the yard does not look like a floating island
+    void MakeFarGround()
+    {
+        Transform holder = new GameObject("Far Ground").transform;
+
+        SpriteRenderer top = SpriteLib.Show(holder, "Top", SpriteLib.Solid(stage.farTop), new Vector2(2000f, 1f), -44);
+        top.transform.position = new Vector3(0f, game.GroundY - 0.5f, 0f);
+
+        SpriteRenderer deep = SpriteLib.Show(holder, "Deep", SpriteLib.Solid(stage.farDeep), new Vector2(2000f, 60f), -44);
+        deep.transform.position = new Vector3(0f, game.GroundY - 1f - 30f, 0f);
+    }
+
     void UpdateHills()
     {
         float rise = camTransform.position.y - startCameraY;
-        PlaceLayer(mountains, mountainsFollow, game.GroundY + 0.3f + rise * 0.92f);
+        PlaceLayer(hills, hillsFollow, game.GroundY + 0.3f + rise * 0.92f);
         PlaceLayer(dunes, dunesFollow, game.GroundY - 1.2f + rise * 0.8f);
     }
 
@@ -310,33 +314,35 @@ public class Scenery : MonoBehaviour
         float camY = camTransform.position.y;
         float halfW = HalfWidth;
         float halfH = HalfHeight;
+        float goal = stage.goalHeight;
 
         // Sometimes a new one flies in from the side
         foreach (CritterKind kind in Kinds)
         {
+            if (kind.earthOnly && !stage.earthCritters)
+                continue;
             if (Random.value > Time.deltaTime * 0.6f)
                 continue;
             if (Count(kind) >= kind.max || !SpriteLib.Has(kind.spriteA))
                 continue;
 
-            float low = Mathf.Max(game.GroundY + kind.low, camY - halfH);
-            float high = Mathf.Min(game.GroundY + kind.high, camY + halfH);
+            float low = Mathf.Max(game.GroundY + kind.low * goal, camY - halfH);
+            float high = Mathf.Min(game.GroundY + kind.high * goal, camY + halfH);
             if (low >= high)
                 continue;
 
             Spawn(kind, Random.value < 0.5f ? -1f : 1f, camX, halfW, Random.Range(low, high));
         }
 
-        // A tumbleweed rolls through the yard now and then
+        // A tumbleweed rolls through the desert yard now and then
         tumbleweedTimer -= Time.deltaTime;
         if (tumbleweedTimer <= 0f)
         {
             tumbleweedTimer = Random.Range(6f, 14f);
             if (tumbleweedSprite != null && height < 4f)
             {
-                CritterKind roll = new CritterKind { name = "Tumbleweed", low = 0f, high = 0f, slowest = 2.5f, fastest = 4f, size = Vector2.one * 0.75f };
-                Critter weed = Spawn(roll, Random.value < 0.5f ? -1f : 1f, camX, halfW, 0f, tumbleweedSprite);
-                weed.baseY = 0f;
+                CritterKind roll = new CritterKind { name = "Tumbleweed", slowest = 2.5f, fastest = 4f, size = Vector2.one * 0.75f };
+                Spawn(roll, Random.value < 0.5f ? -1f : 1f, camX, halfW, 0f, tumbleweedSprite);
             }
         }
 

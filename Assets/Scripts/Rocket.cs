@@ -1,15 +1,24 @@
 /*********************************************************************************************
  * COMPONENT OF: Rocket (made by the game)
- * REQUIRED DEPENDENCIES: Rigidbody 2D, RocketPart, RocketeeGame, LaunchPad, Input System package
+ * REQUIRED DEPENDENCIES: Rigidbody 2D, RocketPart, RocketeeGame, LaunchPad, Stages,
+ *                        Input System package
  * DESCRIPTION: The rocket you built on the grid. Every part gets its own collider and weight,
  *              so the rocket balances like a real object: put the colas on one side and it
- *              spins. In flight, hold Space to spray all colas that still have fuel, A/D to
- *              tilt. Fins stop spinning, a nose cone cuts air drag, and high up the air gets
- *              thin and gravity gets weaker (space!).
+ *              spins. In flight, hold Space to spray all colas (and Mentos) that still have
+ *              fuel, A/D to tilt; let go of A/D and it straightens itself.
+ *              - Crates next to a cola give it spare cola; tanks feed all colas when their
+ *                own bottle is empty.
+ *              - Fins and wings stop spinning, wings add lift, a nose cone cuts air drag.
+ *              - The bubble shield blocks one hit and recharges; the coin magnet pulls coins.
+ *              - High up the air gets thin and gravity weaker. Each stage has its own gravity.
+ *              - Near the Sun the rocket heats up: heat shields slow it down, colas and tanks
+ *                boil away unless a cooler touches them, and at full heat you crash.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.1
- * VERSION 1.1: Easier: the rocket straightens itself up when you let go of A/D, and tilting
- *              feels the same for small and big rockets. Wind sound that gets louder when fast.
+ * VERSION: 1.2
+ * VERSION 1.1: Easier: self-straightening, tilting feels the same for big and small rockets,
+ *              wind sound.
+ * VERSION 1.2: Crate fuel bonus, tanks, heat, coolers, bubble shield, coin magnet, wings,
+ *              Mentos, stage gravity, steering upgrade, god mode and infinite cola (dev mode).
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -27,30 +36,50 @@ public class Rocket : MonoBehaviour
     public float airDrag = 0.4f;
     public float spinDrag = 2f;
 
-    [Header("Space")]
-    // From this height the air starts to get thinner
-    public float thinAirStart = 150f;
-    public float thinAirEnd = 500f;
+    [Header("Space (parts of the way to the goal)")]
+    // The air gets thinner between these parts of the way (0.15 = 15%)
+    public float thinAirStart = 0.15f;
+    public float thinAirEnd = 0.5f;
     // How much drag is left in thin air (0.5 = half)
     public float thinAirDrag = 0.5f;
-    // From this height gravity starts to get weaker
-    public float spaceStart = 420f;
-    public float spaceEnd = 850f;
+    // Gravity gets weaker between these parts of the way
+    public float spaceStart = 0.42f;
+    public float spaceEnd = 0.85f;
     public float spaceGravity = 0.68f;
+
+    [Header("Heat (stage 3)")]
+    // Heat gained per second near the start and near the Sun (1 = cooked)
+    public float heatLow = 0.04f;
+    public float heatHigh = 0.12f;
+    // Heat at which colas start to boil
+    public float boilHeat = 0.4f;
+    // Seconds of cola lost per second at full heat when no cooler touches it
+    public float boilRate = 0.8f;
 
     public Rigidbody2D Body { get; private set; }
     public readonly List<RocketPart> Parts = new List<RocketPart>();
     public RocketPart Seat { get; private set; }
     public bool Flying { get; private set; }
     public bool Crashed { get; private set; }
+    public string CrashReason { get; private set; } = "";
     public bool Spraying { get; private set; }
     public float LaunchHeight { get; private set; }
+    // 0 to 1 (stage 3 only)
+    public float Heat { get; private set; }
+    public bool ShieldReady => shieldParts > 0 && shieldTimer <= 0f;
+    public float MagnetRange { get; private set; }
 
     private SpriteRenderer pilot;
+    private SpriteRenderer bubble;
     private AudioSource sprayLoop;
     private AudioSource windLoop;
+    private AudioSource fireLoop;
     private float tiltInput;
     private bool sprayHeld;
+    private int shieldParts;
+    private float shieldRecharge;
+    private float shieldTimer;
+    private bool alarmPlayed;
 
     public static Rocket Create()
     {
@@ -66,18 +95,22 @@ public class Rocket : MonoBehaviour
         Body.interpolation = RigidbodyInterpolation2D.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
-        sprayLoop = gameObject.AddComponent<AudioSource>();
-        sprayLoop.clip = Sfx.Get("spray_loop");
-        sprayLoop.loop = true;
-        sprayLoop.playOnAwake = false;
-        sprayLoop.volume = 0.6f;
-
-        windLoop = gameObject.AddComponent<AudioSource>();
-        windLoop.clip = Sfx.Get("wind_loop");
-        windLoop.loop = true;
-        windLoop.playOnAwake = false;
-        windLoop.volume = 0f;
+        sprayLoop = MakeLoop("spray_loop");
+        windLoop = MakeLoop("wind_loop");
+        fireLoop = MakeLoop("fire_loop");
     }
+
+    AudioSource MakeLoop(string clip)
+    {
+        AudioSource source = gameObject.AddComponent<AudioSource>();
+        source.clip = Sfx.Get(clip);
+        source.loop = true;
+        source.playOnAwake = false;
+        source.volume = 0f;
+        return source;
+    }
+
+    static RocketeeGame Game => RocketeeGame.Instance;
 
     // ---------- Building ----------
 
@@ -86,13 +119,17 @@ public class Rocket : MonoBehaviour
     {
         Flying = false;
         Crashed = false;
+        CrashReason = "";
         Spraying = false;
+        Heat = 0f;
         Body.bodyType = RigidbodyType2D.Kinematic;
         Body.linearVelocity = Vector2.zero;
         Body.angularVelocity = 0f;
+        // Moves the physics body too, so smoothing can't put it back where it was
+        Body.position = pad.GridOrigin;
+        Body.rotation = 0f;
         transform.SetPositionAndRotation(pad.GridOrigin, Quaternion.identity);
-        if (sprayLoop.isPlaying)
-            sprayLoop.Stop();
+        StopSounds();
     }
 
     // Makes the parts again from the saved layout.
@@ -110,6 +147,9 @@ public class Rocket : MonoBehaviour
         Parts.Clear();
         Seat = null;
         pilot = null;
+        if (bubble != null)
+            Destroy(bubble.gameObject);
+        bubble = null;
 
         HashSet<Vector2Int> connected = ConnectedCells(save.layout);
 
@@ -137,42 +177,9 @@ public class Rocket : MonoBehaviour
             pilot.enabled = false;
         }
 
-        AddCrateFuel(save, !flyingOnly);
+        LinkNeighbors(save, !flyingOnly);
+        SetUpGadgets();
         IgnorePlayer();
-    }
-
-    // Crates are full of spare cola: every cola gets extra spray time for each crate on its
-    // left, right or top. In the yard and build mode a little green + shows each bonus.
-    void AddCrateFuel(GameSave save, bool showBadges)
-    {
-        Dictionary<Vector2Int, RocketPart> byCell = new Dictionary<Vector2Int, RocketPart>();
-        foreach (RocketPart part in Parts)
-            byCell[part.Cell] = part;
-
-        Vector2Int[] sides = { Vector2Int.left, Vector2Int.right, Vector2Int.up };
-        Sprite plus = showBadges ? SpriteLib.Plus(new Color(0.3f, 1f, 0.35f)) : null;
-
-        foreach (RocketPart part in Parts)
-        {
-            if (!part.Info.IsEngine)
-                continue;
-
-            int badges = 0;
-            foreach (Vector2Int side in sides)
-            {
-                if (!byCell.TryGetValue(part.Cell + side, out RocketPart neighbor) || neighbor.Info.fuelBonus <= 0f)
-                    continue;
-
-                part.AddFuel(neighbor.Info.fuelBonus * save.FuelMultiplier);
-
-                if (plus != null)
-                {
-                    SpriteRenderer badge = SpriteLib.Show(part.transform, "Crate Bonus", plus, Vector2.one * 0.3f, 6);
-                    badge.transform.localPosition = new Vector3(0.32f - badges * 0.3f, 0.32f, 0f);
-                    badges++;
-                }
-            }
-        }
     }
 
     RocketPart MakePart(PartInfo info, Vector2Int cell, GameSave save)
@@ -188,13 +195,102 @@ public class Rocket : MonoBehaviour
 
         SpriteRenderer look = SpriteLib.Show(go.transform, "Look", SpriteLib.Get(info.sprite, info.color), Vector2.one, 5);
 
-        // Fins on the right side face the other way
-        if (info.type == PartType.Fin && cell.x > SeatColumn(save))
+        // Fins and wings on the right side face the other way
+        if ((info.type == PartType.Fin || info.type == PartType.Wing) && cell.x > SeatColumn(save))
             look.flipX = true;
 
         RocketPart part = go.AddComponent<RocketPart>();
-        part.Setup(this, info, cell, look, save.FuelMultiplier);
+        part.Setup(this, info, cell, look, save);
         return part;
+    }
+
+    // Crates give spare cola to the colas they touch (left, right or top), and coolers keep
+    // the colas and tanks they touch from boiling. In the yard and build mode a green + shows
+    // each crate bonus.
+    void LinkNeighbors(GameSave save, bool showBadges)
+    {
+        Dictionary<Vector2Int, RocketPart> byCell = new Dictionary<Vector2Int, RocketPart>();
+        foreach (RocketPart part in Parts)
+            byCell[part.Cell] = part;
+
+        Vector2Int[] crateSides = { Vector2Int.left, Vector2Int.right, Vector2Int.up };
+        Vector2Int[] allSides = { Vector2Int.left, Vector2Int.right, Vector2Int.up, Vector2Int.down };
+        Sprite plus = showBadges ? SpriteLib.Plus(new Color(0.3f, 1f, 0.35f)) : null;
+
+        foreach (RocketPart part in Parts)
+        {
+            if (part.IsCola)
+            {
+                int badges = 0;
+                foreach (Vector2Int side in crateSides)
+                {
+                    if (!byCell.TryGetValue(part.Cell + side, out RocketPart neighbor) || neighbor.Info.fuelBonus <= 0f)
+                        continue;
+
+                    part.AddFuel(neighbor.Info.fuelBonus * save.FuelMultiplier);
+                    if (plus != null)
+                    {
+                        SpriteRenderer badge = SpriteLib.Show(part.transform, "Crate Bonus", plus, Vector2.one * 0.3f, 6);
+                        badge.transform.localPosition = new Vector3(0.32f - badges * 0.3f, 0.32f, 0f);
+                        badges++;
+                    }
+                }
+            }
+
+            if (part.Info.HoldsCola)
+            {
+                foreach (Vector2Int side in allSides)
+                {
+                    if (byCell.TryGetValue(part.Cell + side, out RocketPart neighbor) && neighbor.Info.cools)
+                        part.Cooled = true;
+                }
+            }
+        }
+    }
+
+    // Bubble shield and coin magnet
+    void SetUpGadgets()
+    {
+        shieldParts = 0;
+        shieldRecharge = 0f;
+        MagnetRange = 0f;
+        foreach (RocketPart part in Parts)
+        {
+            if (part.Info.shieldRecharge > 0f)
+            {
+                shieldParts++;
+                shieldRecharge = part.Info.shieldRecharge;
+            }
+            // Every extra magnet reaches a bit farther
+            if (part.Info.magnetRange > 0f)
+                MagnetRange = MagnetRange <= 0f ? part.Info.magnetRange : MagnetRange + 2f;
+        }
+        shieldTimer = 0f;
+
+        if (shieldParts > 0)
+        {
+            Bounds bounds = PartBounds();
+            float size = Mathf.Max(bounds.size.x, bounds.size.y) + 1.2f;
+            bubble = SpriteLib.Show(transform, "Bubble Shield", SpriteLib.Circle(64, new Color(0.55f, 0.9f, 1f, 0.25f)), Vector2.one * size, 9);
+            bubble.transform.position = bounds.center;
+            bubble.enabled = false;
+        }
+    }
+
+    Bounds PartBounds()
+    {
+        Bounds bounds = new Bounds(transform.position, Vector3.zero);
+        bool first = true;
+        foreach (RocketPart part in Parts)
+        {
+            Bounds partBounds = new Bounds(part.transform.position, Vector3.one);
+            if (first)
+                bounds = partBounds;
+            else
+                bounds.Encapsulate(partBounds);
+            first = false;
+        }
+        return bounds;
     }
 
     static int SeatColumn(GameSave save)
@@ -252,15 +348,14 @@ public class Rocket : MonoBehaviour
     // The player walks through the rocket in the yard instead of bumping into it
     void IgnorePlayer()
     {
-        RocketeeGame game = RocketeeGame.Instance;
-        if (game == null || game.Player == null || game.Player.Collider == null)
+        if (Game == null || Game.Player == null || Game.Player.Collider == null)
             return;
 
         foreach (RocketPart part in Parts)
         {
             Collider2D collider = part.GetComponent<Collider2D>();
             if (collider != null)
-                Physics2D.IgnoreCollision(collider, game.Player.Collider, true);
+                Physics2D.IgnoreCollision(collider, Game.Player.Collider, true);
         }
     }
 
@@ -288,6 +383,9 @@ public class Rocket : MonoBehaviour
         CameraRig.Shake(0.15f);
         Flying = true;
         Crashed = false;
+        CrashReason = "";
+        Heat = 0f;
+        alarmPlayed = false;
         Body.bodyType = RigidbodyType2D.Dynamic;
         Body.linearVelocity = Vector2.zero;
         Body.angularVelocity = 0f;
@@ -295,14 +393,14 @@ public class Rocket : MonoBehaviour
 
         if (pilot != null)
             pilot.enabled = true;
+        if (bubble != null)
+            bubble.enabled = true;
     }
 
     void Update()
     {
         Keyboard keyboard = Keyboard.current;
-        RocketeeGame game = RocketeeGame.Instance;
-        bool control = Flying && !Crashed && keyboard != null && game != null && game.State == GameState.Flight && !game.Paused;
-        sprayLoop.volume = 0.6f * Settings.SoundVolume;
+        bool control = Flying && !Crashed && keyboard != null && Game != null && Game.State == GameState.Flight && !Game.Paused;
 
         sprayHeld = control && keyboard.spaceKey.isPressed;
         tiltInput = 0f;
@@ -314,19 +412,47 @@ public class Rocket : MonoBehaviour
                 tiltInput -= 1f;
         }
 
-        bool sound = Spraying && Flying;
-        if (sound && !sprayLoop.isPlaying && sprayLoop.clip != null)
-            sprayLoop.Play();
-        else if (!sound && sprayLoop.isPlaying)
-            sprayLoop.Stop();
+        // Bubble shield coming back
+        if (shieldTimer > 0f)
+        {
+            shieldTimer -= Time.deltaTime;
+            if (shieldTimer <= 0f && bubble != null && Flying && !Crashed)
+            {
+                bubble.enabled = true;
+                Sfx.Play("pickup", 0.6f);
+            }
+        }
 
+        UpdateSounds();
+    }
+
+    void UpdateSounds()
+    {
+        float sound = Settings.SoundVolume;
+        SetLoop(sprayLoop, Spraying && Flying ? 0.6f * sound : 0f, 10f);
         // Wind gets louder the faster you go
-        float wind = Flying ? Mathf.Clamp01(Body.linearVelocity.magnitude / 35f) * Settings.SoundVolume : 0f;
-        windLoop.volume = Mathf.MoveTowards(windLoop.volume, wind, Time.deltaTime * 0.8f);
-        if (windLoop.volume > 0.01f && !windLoop.isPlaying && windLoop.clip != null)
-            windLoop.Play();
-        else if (windLoop.volume <= 0.01f && windLoop.isPlaying)
-            windLoop.Stop();
+        SetLoop(windLoop, Flying ? Mathf.Clamp01(Body.linearVelocity.magnitude / 35f) * sound : 0f, 0.8f);
+        // Fire crackles louder the hotter it gets
+        SetLoop(fireLoop, Flying && !Crashed ? Heat * 0.8f * sound : 0f, 1f);
+    }
+
+    static void SetLoop(AudioSource source, float target, float speed)
+    {
+        source.volume = Mathf.MoveTowards(source.volume, target, Time.deltaTime * speed);
+        if (source.volume > 0.01f && !source.isPlaying && source.clip != null)
+            source.Play();
+        else if (source.volume <= 0.01f && source.isPlaying)
+            source.Stop();
+    }
+
+    void StopSounds()
+    {
+        foreach (AudioSource source in new[] { sprayLoop, windLoop, fireLoop })
+        {
+            source.volume = 0f;
+            if (source.isPlaying)
+                source.Stop();
+        }
     }
 
     void FixedUpdate()
@@ -341,54 +467,130 @@ public class Rocket : MonoBehaviour
             return;
 
         if (sprayHeld)
-        {
-            float push = RocketeeGame.Instance != null ? RocketeeGame.Instance.Data.ThrustMultiplier : 1f;
-            Effects effects = RocketeeGame.Instance != null ? RocketeeGame.Instance.Effects : null;
+            Spray();
 
-            foreach (RocketPart part in Parts)
-            {
-                if (part == null || !part.HasFuel)
-                    continue;
-
-                part.Fuel = Mathf.Max(0f, part.Fuel - Time.fixedDeltaTime);
-                Body.AddForceAtPosition((Vector2)transform.up * part.Info.thrust * push, part.Nozzle);
-                Spraying = true;
-
-                if (effects != null)
-                {
-                    Vector2 spray = -(Vector2)transform.up * Random.Range(5f, 8f) + Random.insideUnitCircle * 1.2f;
-                    effects.Spray(part.Nozzle, spray + Body.linearVelocity * 0.5f);
-                }
-            }
-        }
+        UpdateHeat();
 
         // A/D turns the rocket. With no A/D it slowly turns back upright on its own.
         // Times the rocket's inertia, so big and small rockets turn at the same speed.
+        float steering = Game != null ? Game.Data.SteeringMultiplier : 1f;
         float angle = Mathf.DeltaAngle(0f, Body.rotation) * Mathf.Deg2Rad;
         float spin = Body.angularVelocity * Mathf.Deg2Rad;
-        float turn = tiltInput != 0f ? tiltInput * tiltPower : -angle * selfRight - spin * selfRightDamping;
+        float turn = tiltInput != 0f ? tiltInput * tiltPower * steering : -angle * selfRight - spin * selfRightDamping;
         Body.AddTorque(turn * Body.inertia);
     }
 
-    // Thinner air and weaker gravity the higher you go; fins and nose cone help
+    void Spray()
+    {
+        float push = Game != null ? Game.Data.ThrustMultiplier : 1f;
+        bool infinite = Game != null && Game.InfiniteCola;
+        Effects effects = Game != null ? Game.Effects : null;
+        float dt = Time.fixedDeltaTime;
+
+        foreach (RocketPart part in Parts)
+        {
+            if (part == null || !part.Info.IsEngine)
+                continue;
+
+            // Its own bottle first, then spare cola from a tank (Mentos can't use tanks)
+            if (part.Fuel > 0f)
+            {
+                if (!infinite)
+                    part.Fuel = Mathf.Max(0f, part.Fuel - dt);
+            }
+            else if (!part.IsCola || !DrinkFromTank(dt, infinite))
+            {
+                continue;
+            }
+
+            Body.AddForceAtPosition((Vector2)transform.up * part.Info.thrust * push, part.Nozzle);
+            Spraying = true;
+
+            if (effects != null)
+            {
+                Vector2 spray = -(Vector2)transform.up * Random.Range(5f, 8f) + Random.insideUnitCircle * 1.2f;
+                effects.Spray(part.Nozzle, spray + Body.linearVelocity * 0.5f);
+            }
+        }
+    }
+
+    bool DrinkFromTank(float amount, bool infinite)
+    {
+        foreach (RocketPart tank in Parts)
+        {
+            if (tank == null || !tank.IsTank || tank.Fuel <= 0f)
+                continue;
+            if (!infinite)
+                tank.Fuel = Mathf.Max(0f, tank.Fuel - amount);
+            return true;
+        }
+        return false;
+    }
+
+    // Near the Sun: heat goes up, colas boil, and at full heat you are cooked
+    void UpdateHeat()
+    {
+        StageInfo stage = Game != null ? Game.Data.Stage : null;
+        if (stage == null || !stage.heat)
+            return;
+
+        float shieldCut = 0f;
+        foreach (RocketPart part in Parts)
+            shieldCut += part.Info.heatCut;
+        shieldCut = Mathf.Min(0.85f, shieldCut);
+
+        float dt = Time.fixedDeltaTime;
+        float progress = Mathf.Clamp01(Height / stage.goalHeight);
+        Heat = Mathf.Min(1f, Heat + Mathf.Lerp(heatLow, heatHigh, progress) * (1f - shieldCut) * dt);
+
+        if (Heat >= 0.75f && !alarmPlayed)
+        {
+            alarmPlayed = true;
+            Sfx.Play("alarm");
+            Game.UI.Say("TOO HOT! Add heat shields and coolers!", 2.5f);
+        }
+
+        // Colas and tanks without a cooler boil away
+        if (Heat > boilHeat && !Game.InfiniteCola)
+        {
+            float boil = boilRate * Mathf.InverseLerp(boilHeat, 1f, Heat) * dt;
+            foreach (RocketPart part in Parts)
+            {
+                if (part == null || !part.Info.HoldsCola || part.Cooled || part.Fuel <= 0f)
+                    continue;
+                part.Fuel = Mathf.Max(0f, part.Fuel - boil);
+                if (Random.value < 0.05f)
+                    Game.Effects.Spray(part.transform.position + Vector3.up * 0.4f, new Vector2(Random.Range(-0.5f, 0.5f), 2f));
+            }
+        }
+
+        if (Heat >= 1f && !Game.GodMode)
+            Crash("You got too hot near the Sun!");
+    }
+
+    // Thinner air and weaker gravity the higher you go (measured as part of the way to the
+    // goal, so it works the same in every stage). Fins, wings and the nose cone help.
     void UpdateAir()
     {
-        float height = Height;
-        float thinAir = Mathf.Lerp(1f, thinAirDrag, Mathf.InverseLerp(thinAirStart, thinAirEnd, height));
-        float space = Mathf.InverseLerp(spaceStart, spaceEnd, height);
+        StageInfo stage = Game != null ? Game.Data.Stage : Stages.Get(0);
+        float way = Height / stage.goalHeight;
+        float thinAir = Mathf.Lerp(1f, thinAirDrag, Mathf.InverseLerp(thinAirStart, thinAirEnd, way));
+        float space = Mathf.InverseLerp(spaceStart, spaceEnd, way);
 
         float dragCut = 0f;
         float stability = 0f;
+        float lift = 0f;
         foreach (RocketPart part in Parts)
         {
             if (part == null)
                 continue;
             dragCut = Mathf.Max(dragCut, part.Info.dragCut);
             stability += part.Info.stability;
+            lift += part.Info.lift;
         }
 
-        Body.gravityScale = Mathf.Lerp(1f, spaceGravity, space);
-        Body.linearDamping = airDrag * (1f - dragCut) * thinAir;
+        Body.gravityScale = stage.gravity * Mathf.Lerp(1f, spaceGravity, space) * (1f - Mathf.Min(0.3f, lift));
+        Body.linearDamping = airDrag * stage.air * (1f - dragCut) * thinAir;
         Body.angularDamping = spinDrag + stability;
     }
 
@@ -399,16 +601,22 @@ public class Rocket : MonoBehaviour
     {
         get
         {
+            bool hasColaEngine = false;
+            bool tankLeft = false;
             foreach (RocketPart part in Parts)
             {
-                if (part != null && part.HasFuel)
+                if (part == null)
+                    continue;
+                if (part.HasFuel)
                     return true;
+                hasColaEngine |= part.IsCola;
+                tankLeft |= part.IsTank && part.Fuel > 0f;
             }
-            return false;
+            return hasColaEngine && tankLeft;
         }
     }
 
-    // 0 to 1, for the fuel bar
+    // 0 to 1, for the cola meter (bottles and tanks together)
     public float FuelFraction
     {
         get
@@ -417,7 +625,7 @@ public class Rocket : MonoBehaviour
             float max = 0f;
             foreach (RocketPart part in Parts)
             {
-                if (part == null || !part.Info.IsEngine)
+                if (part == null || !part.Info.HoldsCola)
                     continue;
                 left += part.Fuel;
                 max += part.MaxFuel;
@@ -426,7 +634,24 @@ public class Rocket : MonoBehaviour
         }
     }
 
-    // Stops the rocket where it is (you reached the Moon)
+    // Blocks a hit if the bubble shield is up
+    public bool TryBlockHit(Vector3 where)
+    {
+        if (Game != null && Game.GodMode)
+            return true;
+        if (!ShieldReady || !Flying)
+            return false;
+
+        shieldTimer = shieldRecharge / shieldParts;
+        if (bubble != null)
+            bubble.enabled = false;
+        Sfx.Play("hit", 0.5f);
+        if (Game != null)
+            Game.Effects.Burst(where, new Color(0.55f, 0.9f, 1f), 12);
+        return true;
+    }
+
+    // Stops the rocket where it is (you reached the goal)
     public void Stop()
     {
         Flying = false;
@@ -434,29 +659,35 @@ public class Rocket : MonoBehaviour
         Body.bodyType = RigidbodyType2D.Kinematic;
         Body.linearVelocity = Vector2.zero;
         Body.angularVelocity = 0f;
+        StopSounds();
     }
 
-    // A part was destroyed by a meteor
+    // A part was destroyed
     public void LosePart(RocketPart part)
     {
         Parts.Remove(part);
+        // Turned off right away so it can't be hit again this frame
+        part.gameObject.SetActive(false);
         Destroy(part.gameObject);
     }
 
-    // The seat was hit: the pilot flies out and the rocket stops spraying
-    public void Crash()
+    // The pilot flies out and the rocket stops spraying
+    public void Crash(string reason)
     {
         if (Crashed)
             return;
 
         Crashed = true;
+        CrashReason = reason;
         Spraying = false;
         CameraRig.Shake(0.6f);
         Sfx.Play("explosion");
         Sfx.Play("fall", 0.8f);
 
-        if (RocketeeGame.Instance != null && Seat != null)
-            RocketeeGame.Instance.Effects.Burst(Seat.transform.position, new Color(1f, 0.6f, 0.2f), 24);
+        if (Game != null && Seat != null)
+            Game.Effects.Burst(Seat.transform.position, new Color(1f, 0.6f, 0.2f), 24);
+        if (bubble != null)
+            bubble.enabled = false;
 
         if (pilot != null)
         {

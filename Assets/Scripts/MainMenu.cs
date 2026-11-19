@@ -5,8 +5,10 @@
  *              character you play as and its color (with a walking preview). SETTINGS has
  *              music and sound volume, fullscreen and a reset-progress button. QUIT closes
  *              the game (not shown in the web version). Enter = Play, Esc = back.
+ *              Settings > Dev Mode asks for the dev password and turns on the dev tools.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.0
+ * VERSION: 1.1
+ * VERSION 1.1: Dev mode with a password, shows the stage you are on.
  *********************************************************************************************/
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -32,6 +34,14 @@ public class MainMenu : MonoBehaviour
     private Sprite walk1;
     private Sprite walk2;
 
+    // Dev mode password screen
+    private GameObject passwordPanel;
+    private Text passwordText;
+    private Text passwordInfo;
+    private Button devButton;
+    private string typed = "";
+    private bool listening;
+
     void Start()
     {
         Time.timeScale = 1f;
@@ -51,7 +61,13 @@ public class MainMenu : MonoBehaviour
         BuildMainPanel();
         BuildCharacterPanel();
         BuildSettingsPanel();
+        BuildPasswordPanel();
         Show(mainPanel);
+    }
+
+    void OnDestroy()
+    {
+        StopTyping();
     }
 
     void Update()
@@ -63,6 +79,20 @@ public class MainMenu : MonoBehaviour
         Keyboard keyboard = Keyboard.current;
         if (keyboard == null)
             return;
+
+        if (passwordPanel.activeSelf)
+        {
+            if (keyboard.enterKey.wasPressedThisFrame)
+                CheckPassword();
+            else if (keyboard.escapeKey.wasPressedThisFrame)
+                ClosePassword();
+            else if (keyboard.backspaceKey.wasPressedThisFrame && typed.Length > 0)
+            {
+                typed = typed.Substring(0, typed.Length - 1);
+                ShowTyped();
+            }
+            return;
+        }
 
         if (mainPanel.activeSelf && keyboard.enterKey.wasPressedThisFrame)
             Play();
@@ -134,7 +164,9 @@ public class MainMenu : MonoBehaviour
         GameSave save = GameSave.Load();
         string progress = save.flights == 0
             ? "Enter: play"
-            : "Best flight: " + Mathf.RoundToInt(save.bestHeight) + " m    Flights: " + save.flights + (save.reachedMoon ? "    You reached the Moon!" : "");
+            : save.stagesCleared >= Stages.Count
+                ? "You reached the Sun! Flights: " + save.flights
+                : "Stage " + (save.stage + 1) + ": " + save.Stage.name + "    Best: " + Mathf.RoundToInt(save.Best) + " m    Flights: " + save.flights;
         Text info = UIKit.Label(panel, progress, 20, TextAnchor.MiddleCenter, Color.white);
         UIKit.Place(info.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 20f), new Vector2(0f, 60f));
     }
@@ -203,7 +235,7 @@ public class MainMenu : MonoBehaviour
     void BuildSettingsPanel()
     {
         RectTransform panel = UIKit.Panel(root, "Settings", UIKit.PanelColor);
-        UIKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-300f, -250f), new Vector2(300f, 250f));
+        UIKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-300f, -290f), new Vector2(300f, 290f));
         settingsPanel = panel.gameObject;
 
         Text title = UIKit.Label(panel, "SETTINGS", 36, TextAnchor.UpperCenter, UIKit.Gold);
@@ -219,6 +251,9 @@ public class MainMenu : MonoBehaviour
 
         resetButton = UIKit.Button(panel, "", new Color(0.7f, 0.3f, 0.3f), ResetProgress, 22);
         UIKit.Place((RectTransform)resetButton.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-170f, -330f), new Vector2(170f, -284f));
+
+        devButton = UIKit.Button(panel, "", new Color(0.45f, 0.28f, 0.6f), DevButtonClicked, 22);
+        UIKit.Place((RectTransform)devButton.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(-170f, -396f), new Vector2(170f, -350f));
 
         Button back = UIKit.Button(panel, "Back (Esc)", UIKit.ButtonColor, () => Show(mainPanel));
         UIKit.Place((RectTransform)back.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-110f, 18f), new Vector2(110f, 64f));
@@ -246,6 +281,8 @@ public class MainMenu : MonoBehaviour
         if (fullscreenButton != null)
             UIKit.SetButtonText(fullscreenButton, "Fullscreen: " + (Screen.fullScreen ? "ON" : "OFF"));
         UIKit.SetButtonText(resetButton, Time.unscaledTime < resetConfirmUntil ? "Click again to delete everything!" : "Reset progress");
+        if (devButton != null)
+            UIKit.SetButtonText(devButton, Settings.DevMode ? "Dev Mode: ON (click to turn off)" : "Dev Mode");
     }
 
     // Needs two clicks so it is not pressed by accident
@@ -263,5 +300,99 @@ public class MainMenu : MonoBehaviour
         resetConfirmUntil = Time.unscaledTime + 3f;
         RefreshSettings();
         Invoke(nameof(RefreshSettings), 3.05f);
+    }
+
+    // ---------- Dev mode ----------
+
+    void DevButtonClicked()
+    {
+        if (Settings.DevMode)
+        {
+            Settings.DevMode = false;
+            RefreshSettings();
+            return;
+        }
+        typed = "";
+        ShowTyped();
+        passwordInfo.text = "Type the dev password and press Enter";
+        passwordPanel.SetActive(true);
+        StartTyping();
+    }
+
+    void BuildPasswordPanel()
+    {
+        RectTransform panel = UIKit.Panel(root, "Dev Password", new Color(0.12f, 0.06f, 0.18f, 0.97f));
+        UIKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-260f, -140f), new Vector2(260f, 140f));
+        passwordPanel = panel.gameObject;
+
+        Text title = UIKit.Label(panel, "DEV MODE", 32, TextAnchor.UpperCenter, new Color(0.85f, 0.6f, 1f));
+        UIKit.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -56f), new Vector2(0f, -12f));
+
+        RectTransform box = UIKit.Panel(panel, "Box", new Color(0f, 0f, 0f, 0.5f));
+        UIKit.Place(box, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-180f, -10f), new Vector2(180f, 34f));
+        passwordText = UIKit.Label(box, "", 28, TextAnchor.MiddleCenter, Color.white);
+        UIKit.Place(passwordText.rectTransform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+        passwordInfo = UIKit.Label(panel, "", 18, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.8f));
+        UIKit.Place(passwordInfo.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(10f, -50f), new Vector2(-10f, -16f));
+
+        Button cancel = UIKit.Button(panel, "Cancel (Esc)", new Color(0.45f, 0.45f, 0.5f), ClosePassword);
+        UIKit.Place((RectTransform)cancel.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-90f, 16f), new Vector2(90f, 56f));
+
+        passwordPanel.SetActive(false);
+    }
+
+    // Typed letters come from the keyboard (shown as stars)
+    void StartTyping()
+    {
+        if (listening || Keyboard.current == null)
+            return;
+        Keyboard.current.onTextInput += OnLetter;
+        listening = true;
+    }
+
+    void StopTyping()
+    {
+        if (!listening)
+            return;
+        if (Keyboard.current != null)
+            Keyboard.current.onTextInput -= OnLetter;
+        listening = false;
+    }
+
+    void OnLetter(char letter)
+    {
+        if (!passwordPanel.activeSelf || char.IsControl(letter) || typed.Length >= 20)
+            return;
+        typed += letter;
+        ShowTyped();
+    }
+
+    void ShowTyped()
+    {
+        passwordText.text = new string('*', typed.Length);
+    }
+
+    void CheckPassword()
+    {
+        if (Settings.CheckDevPassword(typed))
+        {
+            Settings.DevMode = true;
+            Sfx.Play("buy");
+            ClosePassword();
+            return;
+        }
+
+        Sfx.Play("error");
+        typed = "";
+        ShowTyped();
+        passwordInfo.text = "Wrong password. Try again.";
+    }
+
+    void ClosePassword()
+    {
+        StopTyping();
+        passwordPanel.SetActive(false);
+        RefreshSettings();
     }
 }

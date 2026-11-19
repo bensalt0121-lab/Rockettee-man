@@ -40,20 +40,37 @@ public class SkyCoin : MonoBehaviour
             look.localScale = scale;
         }
 
+        // The coin magnet pulls coins to the rocket
+        RocketeeGame game = RocketeeGame.Instance;
+        Rocket rocket = game != null ? game.Rocket : null;
+        if (rocket != null && rocket.Flying && !rocket.Crashed && rocket.MagnetRange > 0f && rocket.Seat != null)
+        {
+            Vector3 target = rocket.Seat.transform.position;
+            if (Vector2.Distance(transform.position, target) < rocket.MagnetRange)
+                transform.position = Vector3.MoveTowards(transform.position, target, 14f * Time.deltaTime);
+        }
+
         Camera cam = Camera.main;
         if (cam != null && transform.position.y < cam.transform.position.y - 40f)
             Destroy(gameObject);
     }
 
+    private bool taken;
+
     void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.GetComponent<RocketPart>() == null)
+        if (taken || other.GetComponent<RocketPart>() == null)
             return;
+
+        // Counted only once, even if it touches two parts
+        taken = true;
+        GetComponent<Collider2D>().enabled = false;
 
         RocketeeGame game = RocketeeGame.Instance;
         if (game != null)
         {
-            game.Flight.AddCoin(value);
+            // Lucky Coins upgrade makes every coin worth more
+            game.Flight.AddCoin(Mathf.RoundToInt(value * game.Data.CoinMultiplier));
             game.Effects.Burst(transform.position, new Color(1f, 0.85f, 0.2f), 6);
         }
 

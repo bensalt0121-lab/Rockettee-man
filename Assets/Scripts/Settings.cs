@@ -63,6 +63,31 @@ public static class Settings
 
     public static Color PlayerColor => Colors[ColorIndex];
 
+    // ---------- Dev mode ----------
+
+    private const string DevKey = "RocketeeMan.DevMode";
+    // The password is not written here in plain text, only a scrambled number made from it
+    private const uint DevPasswordHash = 0xc954088d;
+
+    public static bool DevMode
+    {
+        get => PlayerPrefs.GetInt(DevKey, 0) == 1;
+        set { PlayerPrefs.SetInt(DevKey, value ? 1 : 0); PlayerPrefs.Save(); }
+    }
+
+    // True if this is the dev password
+    public static bool CheckDevPassword(string password)
+    {
+        // FNV-1a: turns the text into a number; the same text always gives the same number
+        uint hash = 2166136261;
+        foreach (char c in password)
+        {
+            hash ^= c;
+            hash *= 16777619;
+        }
+        return hash == DevPasswordHash;
+    }
+
     // One sprite of the chosen character, for example PlayerSprite("idle").
     // Uses the first character if the chosen one has no picture for this pose.
     public static Sprite PlayerSprite(string pose)

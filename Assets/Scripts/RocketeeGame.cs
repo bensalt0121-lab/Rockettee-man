@@ -2,14 +2,19 @@
  * COMPONENT OF: Rocketee Game (made automatically by SceneBoot in the Play scene)
  * REQUIRED DEPENDENCIES: a Tilemap with a Tilemap Collider 2D as the ground (a plain ground is
  *                        made if there is none), all the other Rocketee Man scripts
- * DESCRIPTION: The boss of the game. Sets up the yard (shop on the left, launch pad, free
- *              starter parts, the player), keeps the money and saved progress, and switches
- *              between walking in the yard, the shop, building, flying and the results.
- *              Game loop: build a rocket -> fly -> earn $1 per meter + coins -> buy more parts
- *              and upgrades -> fly higher -> reach the Moon.
+ * DESCRIPTION: The boss of the game. Sets up the yard for the current stage (shop on the left,
+ *              launch pad, free starter parts, the player), keeps the money and saved
+ *              progress, and switches between walking in the yard, the shop, building, flying
+ *              and the results.
+ *              Game loop: build a rocket -> fly -> earn money for every meter + coins -> buy
+ *              more parts and upgrades -> fly higher -> reach the goal -> next stage
+ *              (Earth -> Moon -> Mars -> the Sun).
  *              Esc pauses. F12 twice in the yard deletes all progress (for testing).
+ *              Dev mode (password in the menu settings): F10 opens the dev tools.
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.0
+ * VERSION: 1.2
+ * VERSION 1.1: Height milestones, quick buttons after a flight.
+ * VERSION 1.2: Three stages, more upgrades, dev tools.
  *********************************************************************************************/
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -22,15 +27,13 @@ public class RocketeeGame : MonoBehaviour
 {
     public static RocketeeGame Instance { get; private set; }
 
-    [Header("Goal")]
-    public float moonHeight = 1000f;
-    // Height of the first meteor (meters)
-    public float firstMeteorHeight = 150f;
-
     [Header("Money")]
-    public int moneyPerMeter = 1;
+    public float moneyPerMeter = 1f;
     public int recordBonus = 20;
-    public int moonBonus = 500;
+    public int goalBonus = 500;
+
+    // One-time bonus the first time you pass these parts of the way to the goal (times the stage number)
+    public static readonly (float part, int bonus)[] Milestones = { (0.1f, 30), (0.25f, 60), (0.5f, 100), (0.75f, 150) };
 
     public GameSave Data { get; private set; }
     public GameState State { get; private set; } = GameState.Yard;
@@ -41,6 +44,7 @@ public class RocketeeGame : MonoBehaviour
     public float GroundY { get; private set; }
     public float YardLeft { get; private set; }
     public float YardRight { get; private set; }
+    public float GoalHeight => Data.Stage.goalHeight;
 
     public YardPlayer Player { get; private set; }
     public LaunchPad Pad { get; private set; }
@@ -52,6 +56,10 @@ public class RocketeeGame : MonoBehaviour
     public Effects Effects { get; private set; }
 
     public bool Paused { get; private set; }
+
+    // Dev tools (only with dev mode on)
+    public bool GodMode { get; private set; }
+    public bool InfiniteCola { get; private set; }
 
     private float resetConfirmUntil;
 
@@ -71,6 +79,7 @@ public class RocketeeGame : MonoBehaviour
         if (Instance == this)
             Instance = null;
         Time.timeScale = 1f;
+        AudioListener.pause = false;
     }
 
     void Start()
@@ -93,17 +102,26 @@ public class RocketeeGame : MonoBehaviour
         SetState(GameState.Yard);
         Cam.Snap();
 
+        StageInfo stage = Data.Stage;
         string who = Settings.CharacterName(Settings.Character);
         if (Data.flights == 0)
             UI.Say("Welcome, " + who + "! Grab the parts lying around,\nthen press E at the launch pad to build a rocket.", 7f);
         else
-            UI.Say("Welcome back, " + who + "! Best flight: " + Mathf.RoundToInt(Data.bestHeight) + " m. The Moon is at " + Mathf.RoundToInt(moonHeight) + " m.", 5f);
+            UI.Say("Stage " + (Data.stage + 1) + ": " + stage.name + ". Best flight: " + Mathf.RoundToInt(Data.Best) + " m, "
+                + stage.goalName + " is at " + Mathf.RoundToInt(stage.goalHeight) + " m.", 5f);
     }
 
     void Update()
     {
         Keyboard keyboard = Keyboard.current;
-        if (keyboard == null || Paused || State != GameState.Yard || !keyboard.f12Key.wasPressedThisFrame)
+        if (keyboard == null || Paused)
+            return;
+
+        // Dev tools
+        if (keyboard.f10Key.wasPressedThisFrame && Settings.DevMode && (State == GameState.Yard || State == GameState.Flight))
+            UI.ToggleDevPanel();
+
+        if (State != GameState.Yard || !keyboard.f12Key.wasPressedThisFrame)
             return;
 
         if (Time.unscaledTime < resetConfirmUntil)
@@ -133,6 +151,7 @@ public class RocketeeGame : MonoBehaviour
 
         MakeWall(left - 0.5f);
         MakeWall(right + 0.5f);
+        MakeFarGround();
 
         // Uses the ones you placed in the scene, or makes new ones
         Pad = FindAnyObjectByType<LaunchPad>();
@@ -158,7 +177,8 @@ public class RocketeeGame : MonoBehaviour
         if (changed)
             YardBuilder.PlaceYardObjects(left, right);
 
-        YardBuilder.Decorate(left, right);
+        // Moon or Mars ground, decorations of this stage
+        YardBuilder.ApplyStage(Data.Stage, left, right);
     }
 
     public static void MakeStarterParts(float left, float right)
@@ -174,6 +194,16 @@ public class RocketeeGame : MonoBehaviour
         wall.transform.position = new Vector3(x, GroundY + 5f, 0f);
         BoxCollider2D box = wall.AddComponent<BoxCollider2D>();
         box.size = new Vector2(1f, 14f);
+    }
+
+    // Solid ground far past the yard, so a rocket that drifts sideways lands instead of
+    // falling forever (the sand you see there is drawn by Scenery)
+    void MakeFarGround()
+    {
+        GameObject ground = new GameObject("Far Ground (solid)");
+        ground.transform.position = new Vector3(0f, GroundY - 1f, 0f);
+        BoxCollider2D box = ground.AddComponent<BoxCollider2D>();
+        box.size = new Vector2(2000f, 2f);
     }
 
     // Only used if the scene has no ground tiles
@@ -284,34 +314,43 @@ public class RocketeeGame : MonoBehaviour
         if (State != GameState.Flight)
             return;
 
-        bool record = height > Data.bestHeight + 0.5f;
+        bool record = height > Data.Best + 0.5f;
         int milestoneMoney = PayMilestones(height, out string milestoneText);
-        int earned = Mathf.FloorToInt(height) * moneyPerMeter + coinMoney + (record ? recordBonus : 0) + milestoneMoney;
+        int earned = MeterMoney(height) + coinMoney + (record ? recordBonus : 0) + milestoneMoney;
 
         Data.money += earned;
         Data.flights++;
         if (record)
-            Data.bestHeight = height;
+            Data.Best = height;
         Data.Save();
 
         SetState(GameState.Results);
-        UI.ShowResults(height, coinCount, coinMoney, earned, record, crashed, milestoneText);
+        UI.ShowResults(height, coinCount, coinMoney, earned, record, crashed ? Rocket.CrashReason : null, milestoneText);
         Sfx.Play("buy");
     }
 
-    // One-time bonus money the first time you fly past each height
-    public static readonly (int height, int bonus)[] Milestones = { (100, 30), (250, 60), (500, 100), (750, 150) };
+    // Money for the height you reached (the Sponsor Deal upgrade adds more)
+    int MeterMoney(float height)
+    {
+        return Mathf.FloorToInt(height * moneyPerMeter * Data.MoneyPerMeterMultiplier);
+    }
 
     int PayMilestones(float height, out string text)
     {
         int money = 0;
         text = "";
-        while (Data.milestones < Milestones.Length && height >= Milestones[Data.milestones].height)
+        int stageNumber = Data.stage + 1;
+        while (Data.stageMilestones[Data.stage] < Milestones.Length)
         {
-            var milestone = Milestones[Data.milestones];
-            money += milestone.bonus;
-            text += "First time past " + milestone.height + " m: +$" + milestone.bonus + "\n";
-            Data.milestones++;
+            var milestone = Milestones[Data.stageMilestones[Data.stage]];
+            float milestoneHeight = Mathf.Round(GoalHeight * milestone.part);
+            if (height < milestoneHeight)
+                break;
+
+            int bonus = milestone.bonus * stageNumber;
+            money += bonus;
+            text += "First time past " + milestoneHeight + " m: +$" + bonus + "\n";
+            Data.stageMilestones[Data.stage]++;
         }
         return money;
     }
@@ -336,22 +375,46 @@ public class RocketeeGame : MonoBehaviour
         OpenShop();
     }
 
-    public void ReachMoon()
+    // ---------- Reaching the goal ----------
+
+    public bool OnLastStage => Data.stage >= Stages.Count - 1;
+
+    public void ReachGoal()
     {
         if (State != GameState.Flight)
             return;
 
         Rocket.Stop();
-        Data.money += PayMilestones(moonHeight, out _);
-        Data.money += Mathf.FloorToInt(moonHeight) * moneyPerMeter + Flight.CoinMoney + moonBonus;
+        Data.money += PayMilestones(GoalHeight, out _);
+        Data.money += MeterMoney(GoalHeight) + Flight.CoinMoney + goalBonus * (Data.stage + 1);
         Data.flights++;
-        Data.bestHeight = Mathf.Max(Data.bestHeight, moonHeight);
-        Data.reachedMoon = true;
+        Data.Best = Mathf.Max(Data.Best, GoalHeight);
+        Data.stagesCleared = Mathf.Max(Data.stagesCleared, Data.stage + 1);
         Data.Save();
 
         SetState(GameState.Won);
         UI.ShowWin();
         Sfx.Play("win");
+    }
+
+    // Goes on to the next stage: the Play scene loads again with the new ground and sky
+    public void NextStage()
+    {
+        if (OnLastStage)
+        {
+            BackToYard();
+            return;
+        }
+        GoToStage(Data.stage + 1);
+    }
+
+    void GoToStage(int stage)
+    {
+        Data.stage = Mathf.Clamp(stage, 0, Stages.Count - 1);
+        Data.Save();
+        Time.timeScale = 1f;
+        AudioListener.pause = false;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
     public void BackToYard()
@@ -415,11 +478,10 @@ public class RocketeeGame : MonoBehaviour
         UI.RefreshShop();
     }
 
-    // 0 = Shake It Harder, 1 = Bigger Bottles, 2 = Bigger Launch Pad
-    public void BuyUpgrade(int which)
+    public void BuyUpgrade(UpgradeType type)
     {
-        UpgradeInfo upgrade = which == 0 ? PartCatalog.ThrustUpgrade : which == 1 ? PartCatalog.FuelUpgrade : PartCatalog.GridUpgrade;
-        int level = which == 0 ? Data.thrustLevel : which == 1 ? Data.fuelLevel : Data.gridLevel;
+        UpgradeInfo upgrade = PartCatalog.Get(type);
+        int level = Data.Level(type);
         if (level >= upgrade.prices.Length)
             return;
 
@@ -431,17 +493,63 @@ public class RocketeeGame : MonoBehaviour
         }
 
         Data.money -= price;
-        if (which == 0)
-            Data.thrustLevel++;
-        else if (which == 1)
-            Data.fuelLevel++;
-        else
-            Data.gridLevel++;
+        Data.upgrades[(int)type]++;
         Data.Save();
 
         Sfx.Play("buy");
         UI.Say(upgrade.name + " is now level " + (level + 1) + "!", 2f);
         UI.RefreshShop();
+
+        // Some upgrades change the rocket on the pad (tougher crates, bigger pad)
+        if (State == GameState.Shop || State == GameState.Yard)
+            Rocket.Rebuild(Data, false);
+    }
+
+    // ---------- Dev tools (dev mode only) ----------
+
+    public void DevAddMoney(int amount)
+    {
+        Data.money += amount;
+        Data.Save();
+        UI.Say("DEV: +$" + amount, 1.5f);
+    }
+
+    public void DevGiveParts()
+    {
+        for (int i = 0; i < Data.owned.Length; i++)
+            Data.owned[i] += i == (int)PartType.Seat ? (Data.owned[i] == 0 ? 1 : 0) : 10;
+        Data.Save();
+        UI.Say("DEV: +10 of every part", 1.5f);
+        if (State == GameState.Build)
+            UI.RefreshBuildBar();
+    }
+
+    public void DevMaxUpgrades()
+    {
+        for (int i = 0; i < Data.upgrades.Length; i++)
+            Data.upgrades[i] = PartCatalog.Upgrades[i].prices.Length;
+        Data.Save();
+        if (State == GameState.Yard)
+            Rocket.Rebuild(Data, false);
+        UI.Say("DEV: all upgrades maxed", 1.5f);
+    }
+
+    public void DevSetStage(int stage)
+    {
+        Data.stagesCleared = Mathf.Max(Data.stagesCleared, stage);
+        GoToStage(stage);
+    }
+
+    public void DevToggleGod()
+    {
+        GodMode = !GodMode;
+        UI.Say("DEV: god mode " + (GodMode ? "ON" : "OFF"), 1.5f);
+    }
+
+    public void DevToggleInfiniteCola()
+    {
+        InfiniteCola = !InfiniteCola;
+        UI.Say("DEV: infinite cola " + (InfiniteCola ? "ON" : "OFF"), 1.5f);
     }
 
     // ---------- Testing ----------
@@ -450,13 +558,7 @@ public class RocketeeGame : MonoBehaviour
     {
         GameSave.Delete();
         Data = GameSave.Load();
-        Rocket.Rebuild(Data, false);
-
-        // Puts all the free starter parts back in the yard
-        foreach (PartPickup pickup in FindObjectsByType<PartPickup>())
-            Destroy(pickup.gameObject);
-        MakeStarterParts(YardLeft, YardRight);
-
-        UI.Say("All progress deleted. Starting over!", 3f);
+        // Back to stage 1 with a fresh yard
+        GoToStage(0);
     }
 }

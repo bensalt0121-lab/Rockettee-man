@@ -38,6 +38,12 @@ public static class SpriteLib
         return sprite;
     }
 
+    // True if there is a picture with this name in Assets/Resources/Sprites
+    public static bool Has(string name)
+    {
+        return Resources.Load<Texture2D>("Sprites/" + name) != null;
+    }
+
     // Size of a sprite in units, counting 32 pixels as 1 unit
     public static Vector2 UnitSize(Sprite sprite)
     {
@@ -63,6 +69,18 @@ public static class SpriteLib
         return Sprite.Create(texture, new Rect(0, 0, width, height), new Vector2(0.5f, 0.5f), PixelsPerUnit);
     }
 
+    // One plain color, no border
+    public static Sprite Solid(Color color)
+    {
+        Texture2D texture = NewTexture(4, 4);
+        Color[] pixels = new Color[16];
+        for (int i = 0; i < pixels.Length; i++)
+            pixels[i] = color;
+        texture.SetPixels(pixels);
+        texture.Apply();
+        return Sprite.Create(texture, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f), PixelsPerUnit);
+    }
+
     // An empty box with a thin border (used for the build grid)
     public static Sprite Outline(int size, Color color)
     {
@@ -79,6 +97,31 @@ public static class SpriteLib
 
         texture.Apply();
         return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), PixelsPerUnit);
+    }
+
+    // A small plus sign with a dark border (the crate bonus badge)
+    public static Sprite Plus(Color color)
+    {
+        string key = "#plus" + ColorUtility.ToHtmlStringRGB(color);
+        if (cache.TryGetValue(key, out Sprite cached) && cached != null)
+            return cached;
+
+        const int size = 9;
+        Texture2D texture = NewTexture(size, size);
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                bool inside = (x >= 3 && x <= 5 && y >= 1 && y <= 7) || (y >= 3 && y <= 5 && x >= 1 && x <= 7);
+                bool edge = !inside && ((x >= 2 && x <= 6 && y >= 0 && y <= 8) || (y >= 2 && y <= 6 && x >= 0 && x <= 8));
+                texture.SetPixel(x, y, inside ? color : edge ? new Color(0f, 0.2f, 0f) : Color.clear);
+            }
+        }
+        texture.Apply();
+
+        Sprite sprite = Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), PixelsPerUnit);
+        cache[key] = sprite;
+        return sprite;
     }
 
     // A filled circle

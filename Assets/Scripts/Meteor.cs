@@ -34,7 +34,8 @@ public class Meteor : MonoBehaviour
 
         meteor.body = go.AddComponent<Rigidbody2D>();
         meteor.body.bodyType = RigidbodyType2D.Kinematic;
-        meteor.body.linearVelocity = new Vector2(Random.Range(-1.5f, 1.5f), Random.Range(-3f, -0.5f));
+        // Slow enough to see coming and steer around
+        meteor.body.linearVelocity = new Vector2(Random.Range(-1f, 1f), Random.Range(-2f, -0.4f));
         meteor.body.angularVelocity = Random.Range(-90f, 90f);
         return meteor;
     }

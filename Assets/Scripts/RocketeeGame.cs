@@ -24,22 +24,13 @@ public class RocketeeGame : MonoBehaviour
 
     [Header("Goal")]
     public float moonHeight = 1000f;
-    public float meteorStartHeight = 120f;
+    // Height of the first meteor (meters)
+    public float firstMeteorHeight = 150f;
 
     [Header("Money")]
     public int moneyPerMeter = 1;
     public int recordBonus = 20;
     public int moonBonus = 500;
-
-    // Free parts lying in the yard: id, part, distance from the left edge of the yard
-    public static readonly (string id, PartType type, float fromLeft)[] StarterParts =
-    {
-        ("starter_crate_1", PartType.Crate, 5.3f),
-        ("starter_seat", PartType.Seat, 6.5f),
-        ("starter_cola_1", PartType.Cola, 7.8f),
-        ("starter_cola_2", PartType.Cola, 12.6f),
-        ("starter_crate_2", PartType.Crate, 13.5f),
-    };
 
     public GameSave Data { get; private set; }
     public GameState State { get; private set; } = GameState.Yard;
@@ -94,6 +85,7 @@ public class RocketeeGame : MonoBehaviour
 
         Build = gameObject.AddComponent<BuildMode>();
         Flight = gameObject.AddComponent<FlightDirector>();
+        gameObject.AddComponent<Scenery>();
         MusicPlayer.Play();
         UI = GameUI.Create(this);
 
@@ -131,10 +123,13 @@ public class RocketeeGame : MonoBehaviour
             MakePlainGround();
         MakeLightIfMissing();
 
+        // Makes the simple flat yard with your sand tiles if Build Everything has not done it yet
+        bool changed = YardBuilder.MakeSimpleGround(YardBuilder.Ground()) > 0;
+
         YardGround.Span(out float left, out float right);
         YardLeft = left;
         YardRight = right;
-        GroundY = YardGround.TopAt((left + right) * 0.5f);
+        GroundY = YardGround.TopAt(YardBuilder.PadX);
 
         MakeWall(left - 0.5f);
         MakeWall(right + 0.5f);
@@ -142,23 +137,34 @@ public class RocketeeGame : MonoBehaviour
         // Uses the ones you placed in the scene, or makes new ones
         Pad = FindAnyObjectByType<LaunchPad>();
         if (Pad == null)
-            Pad = LaunchPad.Create(left + (right - left) * 0.55f);
+            Pad = LaunchPad.Create(Mathf.Clamp(YardBuilder.PadX, left + 3f, right - 3f));
+        else
+            Pad.FixSize();
 
-        if (FindAnyObjectByType<ShopStand>() == null)
-            ShopStand.Create(left + 2.2f);
+        ShopStand shop = FindAnyObjectByType<ShopStand>();
+        if (shop == null)
+            ShopStand.Create(Mathf.Clamp(YardBuilder.ShopX, left + 1.5f, right - 1.5f));
+        else
+            shop.FixSize();
 
         if (FindAnyObjectByType<PartPickup>() == null)
             MakeStarterParts(left, right);
 
         Player = FindAnyObjectByType<YardPlayer>();
         if (Player == null)
-            Player = YardPlayer.Create(left + 4.5f);
+            Player = YardPlayer.Create(Mathf.Clamp(YardBuilder.PlayerX, left + 1f, right - 1f));
+
+        // The yard just changed: move everything to its spot
+        if (changed)
+            YardBuilder.PlaceYardObjects(left, right);
+
+        YardBuilder.Decorate(left, right);
     }
 
     public static void MakeStarterParts(float left, float right)
     {
-        foreach (var starter in StarterParts)
-            PartPickup.Create(starter.id, starter.type, Mathf.Min(left + starter.fromLeft, right - 0.8f));
+        foreach (var starter in YardBuilder.StarterParts)
+            PartPickup.Create(starter.id, starter.type, Mathf.Clamp(starter.x, left + 1f, right - 1f));
     }
 
     // Invisible walls so you can't walk off the edge of the yard
@@ -201,7 +207,7 @@ public class RocketeeGame : MonoBehaviour
         Data.Save();
         Sfx.Play("pickup");
 
-        if (Data.collected.Count >= StarterParts.Length)
+        if (Data.collected.Count >= YardBuilder.StarterParts.Length)
             UI.Say("You have everything for your first rocket!\nGo to the launch pad and press E to build.", 5f);
         else
             UI.Say("Picked up: " + PartCatalog.Get(type).name + "!", 2f);
@@ -279,7 +285,8 @@ public class RocketeeGame : MonoBehaviour
             return;
 
         bool record = height > Data.bestHeight + 0.5f;
-        int earned = Mathf.FloorToInt(height) * moneyPerMeter + coinMoney + (record ? recordBonus : 0);
+        int milestoneMoney = PayMilestones(height, out string milestoneText);
+        int earned = Mathf.FloorToInt(height) * moneyPerMeter + coinMoney + (record ? recordBonus : 0) + milestoneMoney;
 
         Data.money += earned;
         Data.flights++;
@@ -288,8 +295,45 @@ public class RocketeeGame : MonoBehaviour
         Data.Save();
 
         SetState(GameState.Results);
-        UI.ShowResults(height, coinCount, coinMoney, earned, record, crashed);
+        UI.ShowResults(height, coinCount, coinMoney, earned, record, crashed, milestoneText);
         Sfx.Play("buy");
+    }
+
+    // One-time bonus money the first time you fly past each height
+    public static readonly (int height, int bonus)[] Milestones = { (100, 30), (250, 60), (500, 100), (750, 150) };
+
+    int PayMilestones(float height, out string text)
+    {
+        int money = 0;
+        text = "";
+        while (Data.milestones < Milestones.Length && height >= Milestones[Data.milestones].height)
+        {
+            var milestone = Milestones[Data.milestones];
+            money += milestone.bonus;
+            text += "First time past " + milestone.height + " m: +$" + milestone.bonus + "\n";
+            Data.milestones++;
+        }
+        return money;
+    }
+
+    // ---------- Quick buttons on the results screen (no walking back across the yard) ----------
+
+    public void FlyAgain()
+    {
+        BackToYard();
+        BoardRocket();
+    }
+
+    public void BuildFromResults()
+    {
+        BackToYard();
+        EnterBuild();
+    }
+
+    public void ShopFromResults()
+    {
+        BackToYard();
+        OpenShop();
     }
 
     public void ReachMoon()
@@ -298,6 +342,7 @@ public class RocketeeGame : MonoBehaviour
             return;
 
         Rocket.Stop();
+        Data.money += PayMilestones(moonHeight, out _);
         Data.money += Mathf.FloorToInt(moonHeight) * moneyPerMeter + Flight.CoinMoney + moonBonus;
         Data.flights++;
         Data.bestHeight = Mathf.Max(Data.bestHeight, moonHeight);

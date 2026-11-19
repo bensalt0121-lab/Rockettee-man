@@ -7,7 +7,9 @@
  *              tilt. Fins stop spinning, a nose cone cuts air drag, and high up the air gets
  *              thin and gravity gets weaker (space!).
  * AUTHOR: Ben Xiao (written with Claude)
- * VERSION: 1.0
+ * VERSION: 1.1
+ * VERSION 1.1: Easier: the rocket straightens itself up when you let go of A/D, and tilting
+ *              feels the same for small and big rockets. Wind sound that gets louder when fast.
  *********************************************************************************************/
 using System.Collections.Generic;
 using UnityEngine;
@@ -16,8 +18,11 @@ using UnityEngine.InputSystem;
 public class Rocket : MonoBehaviour
 {
     [Header("Flying")]
-    // Turning push for A/D (times the rocket's weight)
-    public float tiltTorque = 2.5f;
+    // How fast A/D turns the rocket
+    public float tiltPower = 4f;
+    // How strongly it turns back upright when you let go of A/D (0 = not at all)
+    public float selfRight = 5f;
+    public float selfRightDamping = 4.5f;
     // Air drag: the rocket has a top speed
     public float airDrag = 0.4f;
     public float spinDrag = 2f;
@@ -29,9 +34,9 @@ public class Rocket : MonoBehaviour
     // How much drag is left in thin air (0.5 = half)
     public float thinAirDrag = 0.5f;
     // From this height gravity starts to get weaker
-    public float spaceStart = 450f;
-    public float spaceEnd = 900f;
-    public float spaceGravity = 0.7f;
+    public float spaceStart = 420f;
+    public float spaceEnd = 850f;
+    public float spaceGravity = 0.68f;
 
     public Rigidbody2D Body { get; private set; }
     public readonly List<RocketPart> Parts = new List<RocketPart>();
@@ -43,6 +48,7 @@ public class Rocket : MonoBehaviour
 
     private SpriteRenderer pilot;
     private AudioSource sprayLoop;
+    private AudioSource windLoop;
     private float tiltInput;
     private bool sprayHeld;
 
@@ -65,6 +71,12 @@ public class Rocket : MonoBehaviour
         sprayLoop.loop = true;
         sprayLoop.playOnAwake = false;
         sprayLoop.volume = 0.6f;
+
+        windLoop = gameObject.AddComponent<AudioSource>();
+        windLoop.clip = Sfx.Get("wind_loop");
+        windLoop.loop = true;
+        windLoop.playOnAwake = false;
+        windLoop.volume = 0f;
     }
 
     // ---------- Building ----------
@@ -125,7 +137,42 @@ public class Rocket : MonoBehaviour
             pilot.enabled = false;
         }
 
+        AddCrateFuel(save, !flyingOnly);
         IgnorePlayer();
+    }
+
+    // Crates are full of spare cola: every cola gets extra spray time for each crate on its
+    // left, right or top. In the yard and build mode a little green + shows each bonus.
+    void AddCrateFuel(GameSave save, bool showBadges)
+    {
+        Dictionary<Vector2Int, RocketPart> byCell = new Dictionary<Vector2Int, RocketPart>();
+        foreach (RocketPart part in Parts)
+            byCell[part.Cell] = part;
+
+        Vector2Int[] sides = { Vector2Int.left, Vector2Int.right, Vector2Int.up };
+        Sprite plus = showBadges ? SpriteLib.Plus(new Color(0.3f, 1f, 0.35f)) : null;
+
+        foreach (RocketPart part in Parts)
+        {
+            if (!part.Info.IsEngine)
+                continue;
+
+            int badges = 0;
+            foreach (Vector2Int side in sides)
+            {
+                if (!byCell.TryGetValue(part.Cell + side, out RocketPart neighbor) || neighbor.Info.fuelBonus <= 0f)
+                    continue;
+
+                part.AddFuel(neighbor.Info.fuelBonus * save.FuelMultiplier);
+
+                if (plus != null)
+                {
+                    SpriteRenderer badge = SpriteLib.Show(part.transform, "Crate Bonus", plus, Vector2.one * 0.3f, 6);
+                    badge.transform.localPosition = new Vector3(0.32f - badges * 0.3f, 0.32f, 0f);
+                    badges++;
+                }
+            }
+        }
     }
 
     RocketPart MakePart(PartInfo info, Vector2Int cell, GameSave save)
@@ -238,6 +285,7 @@ public class Rocket : MonoBehaviour
     {
         Rebuild(save, true);
         LaunchHeight = transform.position.y;
+        CameraRig.Shake(0.15f);
         Flying = true;
         Crashed = false;
         Body.bodyType = RigidbodyType2D.Dynamic;
@@ -271,6 +319,14 @@ public class Rocket : MonoBehaviour
             sprayLoop.Play();
         else if (!sound && sprayLoop.isPlaying)
             sprayLoop.Stop();
+
+        // Wind gets louder the faster you go
+        float wind = Flying ? Mathf.Clamp01(Body.linearVelocity.magnitude / 35f) * Settings.SoundVolume : 0f;
+        windLoop.volume = Mathf.MoveTowards(windLoop.volume, wind, Time.deltaTime * 0.8f);
+        if (windLoop.volume > 0.01f && !windLoop.isPlaying && windLoop.clip != null)
+            windLoop.Play();
+        else if (windLoop.volume <= 0.01f && windLoop.isPlaying)
+            windLoop.Stop();
     }
 
     void FixedUpdate()
@@ -306,8 +362,12 @@ public class Rocket : MonoBehaviour
             }
         }
 
-        if (tiltInput != 0f)
-            Body.AddTorque(tiltInput * tiltTorque * Body.mass);
+        // A/D turns the rocket. With no A/D it slowly turns back upright on its own.
+        // Times the rocket's inertia, so big and small rockets turn at the same speed.
+        float angle = Mathf.DeltaAngle(0f, Body.rotation) * Mathf.Deg2Rad;
+        float spin = Body.angularVelocity * Mathf.Deg2Rad;
+        float turn = tiltInput != 0f ? tiltInput * tiltPower : -angle * selfRight - spin * selfRightDamping;
+        Body.AddTorque(turn * Body.inertia);
     }
 
     // Thinner air and weaker gravity the higher you go; fins and nose cone help
@@ -391,6 +451,7 @@ public class Rocket : MonoBehaviour
 
         Crashed = true;
         Spraying = false;
+        CameraRig.Shake(0.6f);
         Sfx.Play("explosion");
         Sfx.Play("fall", 0.8f);
 

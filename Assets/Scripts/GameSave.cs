@@ -21,7 +21,10 @@ public class PlacedPart
 [System.Serializable]
 public class GameSave
 {
-    public int money;
+    // A little money to start with
+    public int money = 20;
+    // How many height milestones (100, 250, 500, 750 m) already paid their bonus
+    public int milestones;
     public float bestHeight;
     public int flights;
     public bool reachedMoon;

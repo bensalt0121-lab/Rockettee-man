@@ -57,7 +57,7 @@ public class SkyCoin : MonoBehaviour
             game.Effects.Burst(transform.position, new Color(1f, 0.85f, 0.2f), 6);
         }
 
-        Sfx.Play("coin", 0.7f);
+        Sfx.Play("coin");
         Destroy(gameObject);
     }
 }

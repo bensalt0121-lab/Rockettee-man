@@ -106,13 +106,14 @@ public class GameUI : MonoBehaviour
         RefreshVolumes();
     }
 
-    public void ShowResults(float height, int coinCount, int coinMoney, int earned, bool record, bool crashed)
+    public void ShowResults(float height, int coinCount, int coinMoney, int earned, bool record, bool crashed, string milestones)
     {
         resultsText.text =
-            (crashed ? "CRASH! A meteor hit your seat.\n\n" : "Out of cola!\n\n") +
+            (crashed ? "CRASH! A meteor hit your seat.\n" : "Out of cola!\n") +
             "Height: " + Mathf.RoundToInt(height) + " m" + (record ? "   NEW RECORD!" : "") + "\n" +
             "Coins: " + coinCount + "  (+$" + coinMoney + ")\n" +
-            "You earned: $" + earned + "\n\n" +
+            milestones +
+            "You earned: $" + earned + "\n" +
             "Best: " + Mathf.RoundToInt(game.Data.bestHeight) + " m    Moon: " + Mathf.RoundToInt(game.moonHeight) + " m";
     }
 
@@ -151,6 +152,12 @@ public class GameUI : MonoBehaviour
         // Only Enter (not Space), so holding Space at the end of a flight doesn't skip the results
         else if ((game.State == GameState.Results || game.State == GameState.Won) && keyboard.enterKey.wasPressedThisFrame)
             game.BackToYard();
+        else if (game.State == GameState.Results && keyboard.fKey.wasPressedThisFrame)
+            game.FlyAgain();
+        else if (game.State == GameState.Results && keyboard.bKey.wasPressedThisFrame)
+            game.BuildFromResults();
+        else if (game.State == GameState.Results && keyboard.sKey.wasPressedThisFrame)
+            game.ShopFromResults();
     }
 
     void UpdateFlightHud()
@@ -391,16 +398,24 @@ public class GameUI : MonoBehaviour
     void BuildResultsPanel()
     {
         RectTransform panel = UIKit.Panel(root, "Results", UIKit.PanelColor);
-        UIKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-300f, -200f), new Vector2(300f, 200f));
+        UIKit.Place(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-330f, -215f), new Vector2(330f, 215f));
         resultsPanel = panel.gameObject;
 
         Text title = UIKit.Label(panel, "FLIGHT OVER", 34, TextAnchor.UpperCenter, UIKit.Gold);
         UIKit.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -60f), new Vector2(0f, -12f));
         resultsText = UIKit.Label(panel, "", 22, TextAnchor.UpperCenter, Color.white);
-        UIKit.Place(resultsText.rectTransform, Vector2.zero, Vector2.one, new Vector2(20f, 70f), new Vector2(-20f, -70f));
+        UIKit.Place(resultsText.rectTransform, Vector2.zero, Vector2.one, new Vector2(20f, 80f), new Vector2(-20f, -66f));
 
-        Button back = UIKit.Button(panel, "Back to the yard (Enter)", UIKit.ButtonColor, () => game.BackToYard());
-        UIKit.Place((RectTransform)back.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-150f, 16f), new Vector2(150f, 58f));
+        // Quick buttons so you don't have to walk back across the yard every time
+        string[] labels = { "Fly again (F)", "Build (B)", "Shop (S)", "Yard (Enter)" };
+        Color[] colors = { new Color(0.25f, 0.6f, 0.35f), UIKit.ButtonColor, new Color(0.3f, 0.55f, 0.85f), new Color(0.45f, 0.45f, 0.5f) };
+        System.Action[] actions = { game.FlyAgain, game.BuildFromResults, game.ShopFromResults, game.BackToYard };
+        for (int i = 0; i < labels.Length; i++)
+        {
+            Button button = UIKit.Button(panel, labels[i], colors[i], actions[i], 17);
+            float x = -310f + i * 155f;
+            UIKit.Place((RectTransform)button.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(x, 16f), new Vector2(x + 145f, 62f));
+        }
 
         resultsPanel.SetActive(false);
     }

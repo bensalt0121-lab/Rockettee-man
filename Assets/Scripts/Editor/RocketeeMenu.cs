@@ -52,14 +52,37 @@ public static class RocketeeMenu
 
         // Play scene (left open so you can see the yard)
         Scene play = EditorSceneManager.OpenScene(RocketeeBuildSettings.PlayPath, OpenSceneMode.Single);
+
+        // Simple flat ground (32 tiles wide) with your sand tiles
+        UnityEngine.Tilemaps.Tilemap ground = YardBuilder.Ground();
+        if (ground != null)
+            Undo.RegisterCompleteObjectUndo(ground, "Simple Yard");
+        int tiles = YardBuilder.MakeSimpleGround(ground);
+
         int playAdded = AddYardObjects(true);
+
+        // The yard changed: move the shop, pad, cacti, parts and player to their spots
+        YardGround.Span(out float left, out float right);
+        if (tiles > 0)
+            YardBuilder.PlaceYardObjects(left, right);
+
+        ShopStand shop = Object.FindAnyObjectByType<ShopStand>();
+        if (shop != null)
+            shop.FixSize();
+        LaunchPad pad = Object.FindAnyObjectByType<LaunchPad>();
+        if (pad != null)
+            pad.FixSize();
+
+        YardBuilder.Decorate(left, right);
+
         EditorSceneManager.MarkSceneDirty(play);
         EditorSceneManager.SaveScene(play);
 
-        Debug.Log("[Rocketee Man] Build Everything done: added " + playAdded + " objects to Play and " + menuAdded + " to Menu.");
+        Debug.Log("[Rocketee Man] Build Everything done: " + tiles + " ground tiles changed, " + playAdded + " objects in Play, " + menuAdded + " in Menu.");
         EditorUtility.DisplayDialog("Rocketee Man",
             "Everything is built!\n\n" +
-            "Play scene: Rocketee Game, Shop, Launch Pad, starter parts and the player (added " + playAdded + ").\n" +
+            "Play scene: simple flat yard with your sand tiles (" + tiles + " tiles changed), bigger cacti and " +
+            "decorations, Rocketee Game, Shop, Launch Pad, starter parts and the player (added " + playAdded + ").\n" +
             "Menu scene: Main Menu (added " + menuAdded + ").\n\n" +
             "You can move things in the Scene view and save. To start from the menu, open the Menu scene and press Play.",
             "OK");
@@ -93,13 +116,13 @@ public static class RocketeeMenu
 
         if (Object.FindAnyObjectByType<ShopStand>() == null)
         {
-            Undo.RegisterCreatedObjectUndo(ShopStand.Create(left + 2.2f).gameObject, "Add Shop");
+            Undo.RegisterCreatedObjectUndo(ShopStand.Create(Mathf.Clamp(YardBuilder.ShopX, left + 1.5f, right - 1.5f)).gameObject, "Add Shop");
             added++;
         }
 
         if (Object.FindAnyObjectByType<LaunchPad>() == null)
         {
-            Undo.RegisterCreatedObjectUndo(LaunchPad.Create(left + (right - left) * 0.55f).gameObject, "Add Launch Pad");
+            Undo.RegisterCreatedObjectUndo(LaunchPad.Create(Mathf.Clamp(YardBuilder.PadX, left + 2f, right - 2f)).gameObject, "Add Launch Pad");
             added++;
         }
 
@@ -115,7 +138,7 @@ public static class RocketeeMenu
 
         if (withGameAndPlayer && Object.FindAnyObjectByType<YardPlayer>() == null)
         {
-            Undo.RegisterCreatedObjectUndo(YardPlayer.Create(left + 4.5f).gameObject, "Add Player");
+            Undo.RegisterCreatedObjectUndo(YardPlayer.Create(Mathf.Clamp(YardBuilder.PlayerX, left + 1f, right - 1f)).gameObject, "Add Player");
             added++;
         }
 

@@ -34,6 +34,13 @@ public class RocketPart : MonoBehaviour
         Fuel = MaxFuel;
     }
 
+    // Extra spray time from crates touching this cola
+    public void AddFuel(float seconds)
+    {
+        MaxFuel += seconds;
+        Fuel += seconds;
+    }
+
     // Bottom of the part: where the cola sprays out
     public Vector2 Nozzle => transform.TransformPoint(new Vector3(0f, -0.5f, 0f));
 
@@ -54,11 +61,19 @@ public class RocketPart : MonoBehaviour
 
         HitsLeft -= damage;
         flashTimer = 0.15f;
+        CameraRig.Shake(0.3f);
 
         if (HitsLeft <= 0)
+        {
             Break();
-        else
-            Sfx.Play("hit", 0.8f);
+            return;
+        }
+
+        Sfx.Play("hit", 0.8f);
+
+        // Warning: the seat can take one hit, the next one is a crash
+        if (Info.type == PartType.Seat && RocketeeGame.Instance != null)
+            RocketeeGame.Instance.UI.Say("Your seat got hit! One more hit and you crash!", 2.5f);
     }
 
     void Break()
@@ -69,7 +84,9 @@ public class RocketPart : MonoBehaviour
             return;
         }
 
-        Sfx.Play("explosion", 0.7f);
+        // Wood smashes, colas burst
+        bool wooden = Info.type == PartType.Crate || Info.type == PartType.MetalCrate || Info.type == PartType.Fin || Info.type == PartType.Nose;
+        Sfx.Play(wooden ? "crate_break" : "explosion", 0.7f);
         if (RocketeeGame.Instance != null)
             RocketeeGame.Instance.Effects.Burst(transform.position, Info.color, 14);
 

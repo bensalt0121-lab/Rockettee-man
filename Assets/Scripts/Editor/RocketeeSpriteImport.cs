@@ -28,5 +28,11 @@ public class RocketeeSpriteImport : AssetPostprocessor
         importer.mipmapEnabled = false;
         importer.alphaIsTransparency = true;
         importer.wrapMode = TextureWrapMode.Clamp;
+
+        // Full Rect lets the background mountains and dunes repeat (tile) side by side
+        TextureImporterSettings settings = new TextureImporterSettings();
+        importer.ReadTextureSettings(settings);
+        settings.spriteMeshType = SpriteMeshType.FullRect;
+        importer.SetTextureSettings(settings);
     }
 }

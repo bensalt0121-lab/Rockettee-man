@@ -118,8 +118,9 @@ public class BuildMode : MonoBehaviour
             }
 
 #if UNITY_EDITOR
-            // Testing shortcut for the game developer only (not in the real game)
-            if (keyboard.bKey.wasPressedThisFrame)
+            // Testing shortcut for the game developer only (not in the real game).
+            // Not on the frame build mode opened, because B on the results screen also opens it.
+            if (keyboard.bKey.wasPressedThisFrame && !game.JustChanged)
                 AutoBuild();
 #endif
 
@@ -333,7 +334,7 @@ public class BuildMode : MonoBehaviour
     {
         GameSave save = game.Data;
         if (save.Placed(PartType.Seat) == 0)
-            return save.Owned(PartType.Seat) > 0 ? "Put your seat on the grid first." : "Buy a seat in the shop first.";
+            return save.Owned(PartType.Seat) > 0 ? "Put your seat on the grid first." : "Pick up the seat in the yard (or buy one in the shop) first.";
 
         HashSet<Vector2Int> connected = Rocket.ConnectedCells(save.layout);
         if (connected.Count < save.layout.Count)
@@ -343,6 +344,27 @@ public class BuildMode : MonoBehaviour
         if (problem != null)
             return "Add a cola next to the seat so it can fly.";
 
+        // Crates only help when they touch a cola
+        int crates = save.Owned(PartType.Crate) + save.Owned(PartType.MetalCrate);
+        if (crates > 0 && !AnyCrateTouchesCola(save))
+            return "Tip: crates are full of spare cola! Put one beside or on top of a cola so it sprays longer (green +).";
+
         return "Looks good! Press E when you are done, then F at the pad to fly.";
+    }
+
+    static bool AnyCrateTouchesCola(GameSave save)
+    {
+        foreach (PlacedPart cola in save.layout)
+        {
+            if (!PartCatalog.Get(cola.type).IsEngine)
+                continue;
+            foreach (Vector2Int side in new[] { Vector2Int.left, Vector2Int.right, Vector2Int.up })
+            {
+                PlacedPart next = save.At(cola.x + side.x, cola.y + side.y);
+                if (next != null && PartCatalog.Get(next.type).fuelBonus > 0f)
+                    return true;
+            }
+        }
+        return false;
     }
 }

@@ -40,10 +40,14 @@ public static class RocketeeBuildSettings
             if (importer == null)
                 continue;
 
+            TextureImporterSettings settings = new TextureImporterSettings();
+            importer.ReadTextureSettings(settings);
+
             bool sharp = importer.textureType == TextureImporterType.Sprite
                 && importer.filterMode == UnityEngine.FilterMode.Point
                 && importer.spritePixelsPerUnit == 32f
-                && importer.textureCompression == TextureImporterCompression.Uncompressed;
+                && importer.textureCompression == TextureImporterCompression.Uncompressed
+                && settings.spriteMeshType == UnityEngine.SpriteMeshType.FullRect;
             if (sharp)
                 continue;
 

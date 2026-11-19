@@ -16,7 +16,8 @@ public class YardPlayer : MonoBehaviour
 {
     [Header("Movement")]
     public float moveSpeed = 5f;
-    public float jumpSpeed = 11f;
+    // A bit higher than before so you can reach the floating platforms
+    public float jumpPower = 12.5f;
     public float gravityScale = 3f;
     // You can still jump this long after running off an edge
     public float coyoteTime = 0.1f;
@@ -89,7 +90,7 @@ public class YardPlayer : MonoBehaviour
 
         if (canControl && keyboard != null && (keyboard.spaceKey.wasPressedThisFrame || keyboard.wKey.wasPressedThisFrame || keyboard.upArrowKey.wasPressedThisFrame) && coyoteTimer > 0f)
         {
-            body.linearVelocity = new Vector2(body.linearVelocity.x, jumpSpeed);
+            body.linearVelocity = new Vector2(body.linearVelocity.x, jumpPower);
             coyoteTimer = 0f;
             Sfx.Play("jump", 0.6f);
         }

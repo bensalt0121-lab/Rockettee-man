@@ -1,0 +1,58 @@
+ROCKETEE MAN - ART AND SOUND CREDITS
+=====================================
+Every downloaded asset below is CC0 (public domain, https://creativecommons.org/publicdomain/zero/1.0/).
+CC0 does not require credit, but we list everyone anyway as a thank-you.
+
+
+SPRITES  (Assets/Resources/Sprites)
+-----------------------------------
+All sprites were shrunk / redrawn as 32 px-per-unit pixel art for this project
+(box downscale, small colour palette, hard alpha, 1 px dark outline).
+
+player_idle / walk1 / walk2 / jump / sit .png   ("Rocketee Man")
+player2_* .png  (5 frames)                      ("Fizzy Fran")
+player3_* .png  (5 frames)                      ("Professor Pop")
+player4_* .png  (5 frames)                      ("Captain Fizz")
+    Based on: "Platformer Characters 1" by Kenney (www.kenney.nl) - CC0
+        player  = Player,  player2 = Female,  player3 = Adventurer,  player4 = Soldier
+        Poses used: idle, walk1, walk2, jump. The *_sit frames were put together for this
+        project from Kenney's "hold1" pose plus newly drawn bent legs.
+    https://kenney.nl/assets/platformer-characters
+
+meteor_small.png, meteor_med.png, meteor_big.png
+    Based on: "Space Shooter Redux" (Space Shooter Remastered) by Kenney (www.kenney.nl) - CC0
+        meteorBrown_small1, meteorBrown_big3, meteorBrown_big4
+    https://kenney.nl/assets/space-shooter-redux
+
+seat.png, cola.png, cola_big.png, crate.png, crate_metal.png, fin.png, nose.png,
+coin.png, moon.png, cloud_1.png, cloud_2.png, cloud_3.png, shop.png, launch_pad.png, spray.png
+    Drawn for this project (made with code, no outside source). Free to use.
+    The "COLA" bottle is a made-up generic brand (no real logos).
+
+
+SOUND EFFECTS  (Assets/Resources/Audio)
+---------------------------------------
+All sound effects are real downloaded sounds, copied unchanged and only renamed.
+
+jump.ogg        <- phaseJump1.ogg          "Digital Audio" by Kenney - CC0   https://kenney.nl/assets/digital-audio
+pickup.ogg      <- pepSound3.ogg           "Digital Audio" by Kenney - CC0
+coin.ogg        <- powerUp2.ogg            "Digital Audio" by Kenney - CC0
+buy.ogg         <- confirmation_001.ogg    "Interface Sounds" by Kenney - CC0   https://kenney.nl/assets/interface-sounds
+place.ogg       <- drop_002.ogg            "Interface Sounds" by Kenney - CC0
+remove.ogg      <- minimize_001.ogg        "Interface Sounds" by Kenney - CC0
+click.ogg       <- click_001.ogg           "Interface Sounds" by Kenney - CC0
+error.ogg       <- error_006.ogg           "Interface Sounds" by Kenney - CC0
+spray_loop.ogg  <- thrusterFire_004.ogg    "Sci-Fi Sounds" by Kenney - CC0   https://kenney.nl/assets/sci-fi-sounds
+explosion.ogg   <- explosionCrunch_000.ogg "Sci-Fi Sounds" by Kenney - CC0
+hit.ogg         <- impactMining_000.ogg    "Impact Sounds" by Kenney - CC0   https://kenney.nl/assets/impact-sounds
+win.ogg         <- jingles_NES03.ogg       "Music Jingles" by Kenney - CC0   https://kenney.nl/assets/music-jingles
+fall.ogg        <- jingles_NES00.ogg       "Music Jingles" by Kenney - CC0
+launch.mp3      <- glass_bottle_open.mp3   "glass bottle (open & close)" by sinny - CC0
+                   https://opengameart.org/content/glass-bottle-open-close
+
+
+MUSIC  (Assets/Resources/Audio)
+-------------------------------
+music.ogg       "Bartender" by TAD, from "lofi Compilation" - CC0 (about 4 min 06 s)
+                https://opengameart.org/content/lofi-compilation
+                Converted from MP3 to OGG and the silence at the very start/end trimmed so it loops cleanly.
